@@ -45,6 +45,7 @@ app.post('/search', async (req, res) => {
     const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
     const placesResp = await fetch(url);
     const placesData = await placesResp.json();
+    console.log('Google Places API response:', JSON.stringify(placesData, null, 2));
     res.json({ parsed, aiText, places: placesData.results || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -61,6 +62,7 @@ app.post('/directions', async (req, res) => {
     const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&key=${GOOGLE_MAPS_API_KEY}`;
     const resp = await fetch(url);
     const data = await resp.json();
+    console.log('Directions API response:', JSON.stringify(data, null, 2));
     if (data.status !== 'OK') return res.status(500).json({ error: data.error_message || data.status });
     const route = data.routes[0];
     res.json({ polyline: route.overview_polyline, legs: route.legs, route });
