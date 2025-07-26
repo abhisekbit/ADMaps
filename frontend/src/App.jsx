@@ -319,20 +319,41 @@ function App() {
         // Use provided starting point as string
         origin = startingPoint.trim();
       } else {
-        // Get current location
-        const position = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 300000
-          });
-        });
-        
-        origin = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        };
-        setCurrentLocation(origin);
+        // Get current location with secure origin fallback
+        try {
+          if (navigator.geolocation && window.isSecureContext) {
+            const position = await new Promise((resolve, reject) => {
+              navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 300000
+              });
+            });
+            
+            origin = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            setCurrentLocation(origin);
+          } else {
+            // Fallback when geolocation is not available or not secure
+            console.warn('Geolocation not available or not on secure origin, using default location');
+            origin = currentLocation; // Use the default Singapore location
+            setError("Geolocation requires HTTPS. Using default location.");
+          }
+        } catch (error) {
+          console.error('Geolocation error:', error);
+          origin = currentLocation; // Use the default Singapore location
+          if (error.code === 1) {
+            setError("Location access denied. Using default location.");
+          } else if (error.code === 2) {
+            setError("Location unavailable. Using default location.");
+          } else if (error.code === 3) {
+            setError("Location request timeout. Using default location.");
+          } else {
+            setError("Unable to get current location. Using default location.");
+          }
+        }
       }
       
       // Store the navigation origin for search along route
@@ -517,7 +538,7 @@ function App() {
   };
 
   const handleResetToCurrentLocation = () => {
-    if (navigator.geolocation) {
+    if (navigator.geolocation && window.isSecureContext) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const newLocation = {
@@ -526,15 +547,26 @@ function App() {
           };
           setCurrentLocation(newLocation);
           setMapCenter(newLocation);
+          setError(""); // Clear any previous errors
         },
         (error) => {
           console.error('Error getting location:', error);
+          let errorMessage = "Unable to get current location. ";
+          if (error.code === 1) {
+            errorMessage += "Location access denied.";
+          } else if (error.code === 2) {
+            errorMessage += "Location unavailable.";
+          } else if (error.code === 3) {
+            errorMessage += "Location request timeout.";
+          }
+          setError(errorMessage);
           // Fallback to Singapore center
           setMapCenter(singaporeCenter);
         }
       );
     } else {
-      // Fallback to Singapore center
+      // Fallback when geolocation is not available or not secure
+      setError("Geolocation requires HTTPS. Using default location.");
       setMapCenter(singaporeCenter);
     }
   };
@@ -736,9 +768,45 @@ function App() {
     return googleMapsUrl;
   };
 
-  const handleShareRoute = async () => {
+  // Simple test share function for debugging
+  const testWebShare = async () => {
+    console.log('Testing Web Share API...');
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Test Share',
+          text: 'Testing the share functionality',
+          url: 'https://www.google.com'
+        });
+        console.log('Test share successful!');
+      } else {
+        console.log('Web Share API not available');
+      }
+    } catch (error) {
+      console.error('Test share failed:', error);
+    }
+  };
+
+    const handleShareRoute = async (event) => {
+    console.log('Share button clicked!'); // Debug logging
+    console.log('Event:', event);
+    console.log('Event type:', event?.type);
+    console.log('Event isTrusted:', event?.isTrusted);
+    
+    // Ensure this is called from a user gesture
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
     const shareUrl = generateShareableUrl();
-    console.log('Generated share URL:', shareUrl); // Debug logging
+    console.log('Generated share URL:', shareUrl);
+    console.log('Navigator.share available:', !!navigator.share);
+    console.log('User agent:', navigator.userAgent);
+    console.log('Platform:', navigator.platform);
+    console.log('Is mobile:', /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    console.log('Is secure context:', window.isSecureContext);
+    console.log('Protocol:', window.location.protocol);
     
     if (!shareUrl) {
       setShareSnackbarMessage("No route to share. Please navigate to a destination first.");
@@ -747,24 +815,86 @@ function App() {
       return;
     }
 
-    try {
-      // Try to use Web Share API if available (mobile devices)
-      if (navigator.share && navigator.canShare && navigator.canShare({ url: shareUrl })) {
+    // Force Web Share API attempt on mobile devices
+    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (navigator.share && isMobile) {
+      console.log('Mobile device detected, forcing Web Share API...');
+      
+      try {
+        // Try simplest possible share first
+        console.log('Attempting simple URL share...');
         await navigator.share({
-          title: `Route to ${selectedPlace.name}`,
-          text: `Check out this route I planned${addedStops.length > 0 ? ` with ${addedStops.length} stop${addedStops.length !== 1 ? 's' : ''}` : ''} - opens in Google Maps`,
           url: shareUrl
         });
+        
+        console.log('Simple share successful!');
         setShareSnackbarMessage("Google Maps route shared successfully!");
         setShareSnackbarSeverity("success");
         setShareSnackbarOpen(true);
         return;
+        
+      } catch (error) {
+        console.error('Simple share failed:', error);
+        console.log('Error name:', error.name);
+        console.log('Error message:', error.message);
+        
+        // If user cancelled, don't show error
+        if (error.name === 'AbortError') {
+          console.log('User cancelled share');
+          return;
+        }
+        
+        // Try with title and text
+        try {
+          console.log('Trying full share data...');
+          await navigator.share({
+            title: `Route to ${selectedPlace.name}`,
+            text: `Check out this route I planned - opens in Google Maps`,
+            url: shareUrl
+          });
+          
+          console.log('Full share successful!');
+          setShareSnackbarMessage("Google Maps route shared successfully!");
+          setShareSnackbarSeverity("success");
+          setShareSnackbarOpen(true);
+          return;
+          
+        } catch (error2) {
+          console.error('Full share also failed:', error2);
+          console.log('Falling back to clipboard');
+        }
       }
-    } catch (error) {
-      console.log('Web Share API failed:', error);
+    } else if (navigator.share) {
+      console.log('Desktop or Web Share API available but not mobile, trying anyway...');
+      
+      try {
+        await navigator.share({
+          title: `Route to ${selectedPlace.name}`,
+          text: `Check out this route I planned - opens in Google Maps`,
+          url: shareUrl
+        });
+        
+        setShareSnackbarMessage("Google Maps route shared successfully!");
+        setShareSnackbarSeverity("success");
+        setShareSnackbarOpen(true);
+        return;
+        
+      } catch (error) {
+        console.log('Desktop share failed:', error);
+        if (error.name === 'AbortError') {
+          console.log('User cancelled share');
+          return;
+        }
+      }
+    } else {
+      console.log('Web Share API not available');
+      console.log('navigator.share exists:', !!navigator.share);
+      console.log('isSecureContext:', window.isSecureContext);
     }
 
     // Fallback to clipboard
+    console.log('Using clipboard fallback');
     copyToClipboard(shareUrl);
   };
 
@@ -860,9 +990,15 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <GlobalStyles styles={{
-        html: { width: '100vw', height: '100vh', margin: 0, padding: 0, overflow: 'hidden' },
-        body: { width: '100vw', height: '100vh', margin: 0, padding: 0, overflow: 'hidden' },
-        '#root': { width: '100vw', height: '100vh', margin: 0, padding: 0, overflow: 'hidden' },
+        html: { width: '100vw', height: '100vh', margin: 0, padding: 0 },
+        body: { width: '100vw', height: '100vh', margin: 0, padding: 0 },
+        '#root': { width: '100vw', height: '100vh', margin: 0, padding: 0 },
+        // Allow scrolling on mobile
+        '@media (max-width: 899px)': {
+          html: { height: 'auto', minHeight: '100vh' },
+          body: { height: 'auto', minHeight: '100vh' },
+          '#root': { height: 'auto', minHeight: '100vh' }
+        }
       }} />
       
       {/* Splash Screen */}
@@ -960,7 +1096,14 @@ function App() {
           </Box>
         </Box>
       )}
-      <Box sx={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Box sx={{ 
+        width: '100vw', 
+        height: { xs: 'auto', md: '100vh' }, 
+        minHeight: '100vh',
+        display: 'flex', 
+        flexDirection: 'column', 
+        overflow: { xs: 'visible', md: 'hidden' } 
+      }}>
         {/* Slim Header with Icon-inspired Background */}
         <Box sx={{ 
           color: 'white', 
@@ -1040,18 +1183,24 @@ function App() {
         </Box>
 
         {/* Main Content */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: { xs: 'column', md: 'row' }, overflow: 'hidden' }}>
+        <Box sx={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: { xs: 'column', md: 'row' }, // Normal order: content first, map last
+          overflow: { xs: 'visible', md: 'hidden' },
+          minHeight: { xs: 'calc(100vh - 70px)', md: 'auto' } // Account for header height
+        }}>
           {/* Left Panel: Search, Results, Route Details */}
           <Box sx={{ 
             width: { xs: '100%', md: '30%' }, 
             height: { xs: 'auto', md: '100%' },
-            minHeight: { xs: '60vh', md: 'auto' },
+            maxHeight: { xs: 'none', md: '100%' },
             p: { xs: 2, sm: 3 }, 
             display: 'flex', 
             flexDirection: 'column', 
             minWidth: 0, 
             bgcolor: darkMode ? '#111111' : '#f8f8f8', 
-            overflowY: 'auto',
+            overflowY: { xs: 'visible', md: 'auto' },
             borderRight: { md: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}` }
           }}>
             {/* Search Section */}
@@ -1208,6 +1357,23 @@ function App() {
                     />
                   </Autocomplete>
                 )}
+                
+                {/* HTTPS Notice for current location */}
+                {!window.isSecureContext && (
+                  <Typography variant="body2" sx={{ 
+                    mb: 2, 
+                    color: 'warning.main', 
+                    fontWeight: 600,
+                    p: 1.5,
+                    bgcolor: darkMode ? 'rgba(255, 152, 0, 0.1)' : 'rgba(255, 152, 0, 0.1)',
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'warning.main'
+                  }}>
+                    ⚠️ Current location requires HTTPS. Please specify a starting point or access via HTTPS for automatic location detection.
+                  </Typography>
+                )}
+                
                 {startingPointLocation && (
                   <Typography variant="body2" sx={{ mb: 2, color: 'success.main', fontWeight: 600 }}>
                     ✓ Starting point selected: {startingPoint}
@@ -1316,6 +1482,34 @@ function App() {
                       title="Share in Google Maps"
                     >
                       <ShareIcon fontSize="small" />
+                    </IconButton>
+                    {/* DEBUG: Simple test share button - remove after testing */}
+                    <IconButton
+                      onClick={async () => {
+                        console.log('TEST SHARE clicked!');
+                        try {
+                          if (navigator.share) {
+                            console.log('Testing with simple data...');
+                            await navigator.share({
+                              title: 'Test',
+                              url: 'https://www.google.com'
+                            });
+                            console.log('Test share worked!');
+                          } else {
+                            console.log('No navigator.share');
+                          }
+                        } catch (e) {
+                          console.error('Test share failed:', e);
+                        }
+                      }}
+                      size="small"
+                      sx={{
+                        color: 'red',
+                        bgcolor: 'rgba(255, 0, 0, 0.1)',
+                      }}
+                      title="Test Share (DEBUG)"
+                    >
+                      🧪
                     </IconButton>
                     <IconButton
                       onClick={handleCopyRouteLink}
@@ -1799,23 +1993,26 @@ function App() {
           <Box sx={{ 
             flex: 1, 
             minWidth: 0, 
-            height: { xs: '50vh', md: '100%' }, 
+            height: { xs: '60vh', md: '100%' }, 
             width: { xs: '100%', md: '70%' }, 
-            p: { xs: 1, md: 0 }, 
+            p: { xs: 0, md: 0 }, 
             m: 0, 
-            bgcolor: darkMode ? '#000000' : '#f8f8f8' 
+            bgcolor: darkMode ? '#000000' : '#f8f8f8'
           }}>
             <Paper elevation={12} sx={{ 
               height: '100%', 
-              borderRadius: { xs: 2, md: 0 }, 
+              borderRadius: 0, 
               overflow: 'hidden', 
-              boxShadow: darkMode 
-                ? '0 24px 64px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.4)'
-                : '0 24px 64px rgba(0,0,0,0.15), 0 8px 24px rgba(0,0,0,0.08)', 
+              boxShadow: { 
+                xs: 'none',
+                md: darkMode 
+                  ? '0 24px 64px rgba(0,0,0,0.6), 0 8px 24px rgba(0,0,0,0.4)'
+                  : '0 24px 64px rgba(0,0,0,0.15), 0 8px 24px rgba(0,0,0,0.08)'
+              }, 
               m: 0, 
               p: 0, 
               position: 'relative',
-              border: darkMode ? '1px solid rgba(255,255,255,0.1)' : 'none'
+              border: { xs: 'none', md: darkMode ? '1px solid rgba(255,255,255,0.1)' : 'none' }
             }}>
               {/* Reset to current location button */}
               <Button
