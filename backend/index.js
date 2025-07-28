@@ -3,6 +3,8 @@ const cors = require('cors');
 require('dotenv').config();
 
 const OpenAI = require('openai');
+const jwt = require('jsonwebtoken');
+const { authenticateToken, ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET } = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 4001;
@@ -19,9 +21,33 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Login endpoint
+app.post('/login', (req, res) => {
+  console.log('Login attempt:', req.body);
+  const { username, password } = req.body;
+  
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    const token = jwt.sign(
+      { username, timestamp: Date.now() },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    
+    console.log('Login successful for user:', username);
+    res.json({ 
+      token, 
+      message: 'Welcome to PitStopPal! Login successful',
+      expiresIn: '24h'
+    });
+  } else {
+    console.log('Login failed for user:', username);
+    res.status(401).json({ error: 'Invalid credentials' });
+  }
+});
+
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-app.post('/search', async (req, res) => {
+app.post('/search', authenticateToken, async (req, res) => {
   const { query } = req.body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
 
@@ -53,7 +79,7 @@ app.post('/search', async (req, res) => {
   }
 });
 
-app.post('/directions', async (req, res) => {
+app.post('/directions', authenticateToken, async (req, res) => {
   const { origin, destination } = req.body;
   if (!origin || !destination) return res.status(400).json({ error: 'Missing origin or destination' });
   try {
@@ -72,7 +98,7 @@ app.post('/directions', async (req, res) => {
   }
 });
 
-app.post('/add-stop', async (req, res) => {
+app.post('/add-stop', authenticateToken, async (req, res) => {
   const { routePolyline, currentLocation, stopQuery } = req.body;
   if (!routePolyline || !currentLocation || !stopQuery) {
     return res.status(400).json({ error: 'Missing routePolyline, currentLocation, or stopQuery' });
@@ -422,7 +448,7 @@ app.post('/add-stop', async (req, res) => {
   }
 });
 
-app.post('/add-stop-to-route', async (req, res) => {
+app.post('/add-stop-to-route', authenticateToken, async (req, res) => {
   const { origin, destination, stop } = req.body;
   if (!origin || !destination || !stop) {
     return res.status(400).json({ error: 'Missing origin, destination, or stop' });
@@ -454,7 +480,7 @@ app.post('/add-stop-to-route', async (req, res) => {
   }
 });
 
-app.post('/recalculate-route', async (req, res) => {
+app.post('/recalculate-route', authenticateToken, async (req, res) => {
   const { origin, destination, stops } = req.body;
   if (!origin || !destination) {
     return res.status(400).json({ error: 'Missing origin or destination' });

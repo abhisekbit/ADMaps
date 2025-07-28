@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './components/Login';
 import { 
   Box, 
   TextField, 
@@ -182,7 +184,19 @@ const getPlacePhotoUrl = (photoRef, maxWidth = 80) =>
     ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxWidth}&photoreference=${photoRef}&key=${MAPS_API_KEY}`
     : null;
 
-function App() {
+// Main authenticated app component
+function AuthenticatedApp() {
+  const { getAuthHeader, logout } = useAuth();
+
+  // Helper function to handle API responses with auth error handling
+  const handleApiResponse = async (response) => {
+    if (response.status === 401 || response.status === 403) {
+      console.log('Authentication failed, logging out...');
+      logout();
+      return null;
+    }
+    return response;
+  };
   const [showSplash, setShowSplash] = React.useState(true);
   const [search, setSearch] = React.useState("");
   const [places, setPlaces] = React.useState([]);
@@ -241,10 +255,17 @@ function App() {
     try {
       const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/search`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
         body: JSON.stringify({ query: search })
       });
-      const data = await resp.json();
+      
+      const handledResp = await handleApiResponse(resp);
+      if (!handledResp) return; // Authentication failed, user logged out
+      
+      const data = await handledResp.json();
       if (data.error) throw new Error(data.error);
       setPlaces(data.places || []);
       if (data.places && data.places.length > 0) {
@@ -362,7 +383,10 @@ function App() {
       // Get directions
               const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/directions`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
         body: JSON.stringify({
           origin: origin,
           destination: selectedPlace.geometry.location
@@ -486,7 +510,10 @@ function App() {
       try {
         const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/recalculate-route`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { 
+            "Content-Type": "application/json",
+            ...getAuthHeader()
+          },
           body: JSON.stringify({
             origin: navigationOrigin,
             destination: selectedPlace.geometry.location,
@@ -584,7 +611,10 @@ function App() {
       
       const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/add-stop`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
         body: JSON.stringify({
           routePolyline: encodedPolyline,
           currentLocation: searchOrigin,
@@ -639,7 +669,10 @@ function App() {
     try {
       const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/add-stop-to-route`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
         body: JSON.stringify({
           origin: navigationOrigin,
           destination: selectedPlace.geometry.location,
@@ -1162,24 +1195,49 @@ function App() {
             </Box>
           </Box>
 
-          {/* Dark Mode Toggle */}
-          <Button
-            onClick={() => setDarkMode(!darkMode)}
-            sx={{
-              minWidth: 'auto',
-              width: { xs: '32px', md: '60px' },
-              height: '32px',
-              borderRadius: '16px',
-              color: 'white',
-              bgcolor: 'rgba(255,255,255,0.15)',
-              '&:hover': {
-                bgcolor: 'rgba(255,255,255,0.25)',
-              },
-              fontSize: '1rem'
-            }}
-          >
-            {darkMode ? '☀️' : '🌙'}
-          </Button>
+          <Box sx={{ display: 'flex', gap: 1 }}>
+            {/* Logout Button */}
+            <Button
+              onClick={logout}
+              sx={{
+                minWidth: 'auto',
+                width: { xs: '32px', md: '70px' },
+                height: '32px',
+                borderRadius: '16px',
+                color: 'white',
+                bgcolor: 'rgba(255,255,255,0.15)',
+                '&:hover': {
+                  bgcolor: 'rgba(255,255,255,0.25)',
+                },
+                fontSize: '0.8rem',
+                px: { xs: 0, md: 1 }
+              }}
+              title="Logout"
+            >
+              <Box sx={{ display: { xs: 'block', md: 'none' } }}>🚪</Box>
+              <Box sx={{ display: { xs: 'none', md: 'block' } }}>Logout</Box>
+            </Button>
+
+            {/* Dark Mode Toggle */}
+            <Button
+              onClick={() => setDarkMode(!darkMode)}
+              sx={{
+                minWidth: 'auto',
+                width: { xs: '32px', md: '60px' },
+                height: '32px',
+                borderRadius: '16px',
+                color: 'white',
+                bgcolor: 'rgba(255,255,255,0.15)',
+                '&:hover': {
+                  bgcolor: 'rgba(255,255,255,0.25)',
+                },
+                fontSize: '1rem'
+              }}
+              title={darkMode ? 'Light Mode' : 'Dark Mode'}
+            >
+              {darkMode ? '☀️' : '🌙'}
+            </Button>
+          </Box>
         </Box>
 
         {/* Main Content */}
@@ -1482,34 +1540,6 @@ function App() {
                       title="Share in Google Maps"
                     >
                       <ShareIcon fontSize="small" />
-                    </IconButton>
-                    {/* DEBUG: Simple test share button - remove after testing */}
-                    <IconButton
-                      onClick={async () => {
-                        console.log('TEST SHARE clicked!');
-                        try {
-                          if (navigator.share) {
-                            console.log('Testing with simple data...');
-                            await navigator.share({
-                              title: 'Test',
-                              url: 'https://www.google.com'
-                            });
-                            console.log('Test share worked!');
-                          } else {
-                            console.log('No navigator.share');
-                          }
-                        } catch (e) {
-                          console.error('Test share failed:', e);
-                        }
-                      }}
-                      size="small"
-                      sx={{
-                        color: 'red',
-                        bgcolor: 'rgba(255, 0, 0, 0.1)',
-                      }}
-                      title="Test Share (DEBUG)"
-                    >
-                      🧪
                     </IconButton>
                     <IconButton
                       onClick={handleCopyRouteLink}
@@ -2188,6 +2218,44 @@ function App() {
       </Snackbar>
     </ThemeProvider>
   );
+}
+
+// App wrapper with authentication
+function App() {
+  return (
+    <AuthProvider>
+      <AppWithAuth />
+    </AuthProvider>
+  );
+}
+
+// Component that handles auth state
+function AppWithAuth() {
+  const { isAuthenticated, login, loading } = useAuth();
+  const [darkMode, setDarkMode] = React.useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : false;
+  });
+
+  if (loading) {
+    return (
+      <Box sx={{ 
+        height: '100vh', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        bgcolor: darkMode ? '#121212' : '#f5f5f5'
+      }}>
+        <Typography variant="h6">Loading...</Typography>
+      </Box>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login onLogin={login} darkMode={darkMode} />;
+  }
+
+  return <AuthenticatedApp />;
 }
 
 export default App;
