@@ -12,6 +12,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@azure/app-configuration": "^1.9.0",
+    "@azure/identity": "^4.10.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.0",
     "express": "^5.1.0",

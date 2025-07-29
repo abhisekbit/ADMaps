@@ -1,8 +1,8 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-key-change-in-production';
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'YYYY';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME ;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ;
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];

@@ -253,7 +253,7 @@ function AuthenticatedApp() {
     setError("");
     setPlaces([]);
     try {
-      const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/search`, {
+      const resp = await fetch('/search', {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -381,7 +381,7 @@ function AuthenticatedApp() {
       setNavigationOrigin(origin);
       
       // Get directions
-              const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/directions`, {
+              const resp = await fetch('/directions', {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -508,7 +508,7 @@ function AuthenticatedApp() {
     // Recalculate route without the removed stop
     if (selectedPlace && navigationOrigin) {
       try {
-        const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/recalculate-route`, {
+        const resp = await fetch('/recalculate-route', {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
@@ -609,7 +609,7 @@ function AuthenticatedApp() {
       // Use the navigation origin (starting point of the route) for searching stops
       const searchOrigin = navigationOrigin || currentLocation;
       
-      const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/add-stop`, {
+      const resp = await fetch('/add-stop', {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -667,7 +667,7 @@ function AuthenticatedApp() {
     await new Promise(resolve => setTimeout(resolve, 150));
     
     try {
-      const resp = await fetch(`${import.meta.env.VITE_BACKEND_URL}/add-stop-to-route`, {
+      const resp = await fetch('/add-stop-to-route', {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",

@@ -18,8 +18,7 @@ const Login = ({ onLogin, darkMode }) => {
     setError('');
 
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4001';
-      const response = await fetch(`${backendUrl}/login`, {
+      const response = await fetch('/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(credentials),

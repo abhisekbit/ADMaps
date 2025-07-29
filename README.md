@@ -1,269 +1,114 @@
-# 🗺️ PitStopPal - Your Smart Travel Companion
+# PitStopPal 🚗
 
-A modern, secure web application for intelligent route planning and navigation with AI-powered features. Your cheeky co-pilot for finding the perfect stops along your route. Built with React, Node.js, and integrated with Google Maps and OpenAI.
+Your cheeky co-pilot for pee, petrol, and pakoras! Find the perfect stops along your route with smart search and navigation.
 
-## ✨ Features
+## 🎯 Quick Start
 
-- 🔐 **Secure Authentication**: JWT-based login system with persistent sessions
-- 🗺️ **Interactive Maps**: Full Google Maps integration with satellite/terrain views
-- 🔍 **Smart Search**: AI-powered place search with ratings and photos
-- 🛣️ **Intelligent Routing**: Optimized route planning with real-time directions
-- 🚏 **Dynamic Stops**: Add/remove stops along your route on the fly
-- 📱 **Mobile Responsive**: Works seamlessly on desktop and mobile devices
-- 🌙 **Dark Mode**: Beautiful dark/light theme switching
-- 📤 **Share Routes**: Native sharing on mobile, clipboard fallback on desktop
-- ⚡ **Real-time Updates**: Live route recalculation and traffic-aware routing
+### Prerequisites
+- Node.js and npm
+- Docker Desktop
+- Azure CLI
+
+### Local Development
+```bash
+# Start the application locally
+docker-compose up
+
+# Or test the Docker images
+./test-local.sh
+```
+
+### Deploy to Azure
+```bash
+# One-command deployment
+./azure-deploy.sh
+```
+
+📖 **For detailed deployment instructions, see [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)**
 
 ## 🏗️ Architecture
 
+- **Frontend**: React with Vite, Material-UI
+- **Backend**: Node.js with Express
+- **Deployment**: Azure Web App with Docker containers
+- **Configuration**: Azure App Configuration
+- **Database**: In-memory (can be extended to Azure SQL)
+
+## 🚀 Features
+
+- **Smart Route Planning**: Find optimal stops for fuel, food, and rest
+- **Real-time Navigation**: Google Maps integration
+- **AI-Powered Search**: OpenAI integration for intelligent recommendations
+- **Responsive Design**: Works on desktop and mobile
+- **Secure Authentication**: JWT-based login system
+
+## 📁 Project Structure
+
 ```
-PitStopPal/
-├── frontend/          # React + Vite application
-│   ├── src/
-│   │   ├── components/   # Login and UI components
-│   │   ├── context/      # Authentication context
-│   │   └── App.jsx       # Main application
-├── backend/           # Node.js + Express API
-│   ├── middleware/       # Authentication middleware
-│   └── index.js         # API routes and logic
-├── scripts/           # Azure deployment scripts
-└── env-examples/      # Environment variable templates
+ADMaps/
+├── backend/                 # Node.js backend
+│   ├── index.js            # Main server file
+│   ├── config.js           # Azure App Configuration
+│   ├── Dockerfile          # Backend container
+│   └── public/             # Frontend build (copied)
+├── frontend/               # React frontend
+│   ├── src/                # React source code
+│   ├── package.json        # Frontend dependencies
+│   └── vite.config.js      # Vite configuration
+├── azure-deploy.sh         # Main deployment script
+├── test-local.sh           # Local testing script
+├── setup-local.sh          # Local development setup
+├── docker-compose.yml      # Local development
+├── azure-app-config-setup.sh # App Configuration setup
+├── env.local.example       # Local environment template
+└── DEPLOYMENT_GUIDE.md    # Comprehensive deployment guide
 ```
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 18+ 
-- Google Maps API Key
-- OpenAI API Key (optional, for enhanced features)
-
-### Local Development
-
-1. **Clone and Setup**
-   ```bash
-   git clone <repository-url>
-       cd PitStopPal
-   ```
-
-2. **Backend Setup**
-   ```bash
-   cd backend
-   npm install
-   cp ../env-examples/backend.env.example .env
-   # Edit .env with your API keys
-   npm start
-   ```
-
-3. **Frontend Setup**
-   ```bash
-   cd frontend
-   npm install
-   cp ../env-examples/frontend.env.example .env.local
-   # Edit .env.local with your configuration
-   npm run dev
-   ```
-
-4. **Access Application**
-   - Frontend: http://localhost:5173
-   - Backend: http://localhost:4001
-   - **Default Login**: `admin` / `XXXX`
-
-## 🔐 Authentication
-
-The application uses JWT-based authentication with:
-- **Session Persistence**: 24-hour token validity
-- **Automatic Logout**: On token expiration or auth failure
-- **Secure Headers**: All API calls include authentication
-- **Default Credentials**: Configurable via environment variables
-
-### API Protection
-All backend routes are protected except:
-- `GET /health` - Health check
-- `POST /login` - Authentication endpoint
-
-## ☁️ Azure Deployment
-
-### Automated Deployment
-Use our comprehensive deployment scripts:
-
-```bash
-# Install Azure CLI and login
-az login
-
-# Complete deployment (creates resources + deploys both apps)
-./scripts/deploy-all.sh
-
-# Or deploy individually
-./scripts/deploy-backend.sh
-./scripts/deploy-frontend.sh
-```
-
-### Manual Azure Setup
-
-1. **Create Resources**
-   ```bash
-   # Resource group
-   az group create --name rg-admaps --location "East US"
-   
-   # App Service Plan
-   az appservice plan create --name plan-admaps --resource-group rg-admaps --sku B1 --is-linux
-   
-   # Backend Web App
-   az webapp create --resource-group rg-admaps --plan plan-admaps --name admaps-backend-api --runtime "NODE:18-lts"
-   
-   # Frontend Web App
-   az webapp create --resource-group rg-admaps --plan plan-admaps --name admaps-frontend-app --runtime "NODE:18-lts"
-   ```
-
-2. **Configure App Settings**
-   ```bash
-   # Backend settings
-   az webapp config appsettings set --name admaps-backend-api --resource-group rg-admaps --settings \
-     GOOGLE_MAPS_API_KEY="your-key" \
-     OPENAI_API_KEY="your-key" \
-     JWT_SECRET="your-secret" \
-     ADMIN_USERNAME="admin" \
-     ADMIN_PASSWORD="your-password"
-   ```
-
-### Deployment URLs
-After deployment:
-- **Frontend**: `https://admaps-frontend-app.azurewebsites.net`
-- **Backend**: `https://admaps-backend-api.azurewebsites.net`
-
-## 🔒 Security & API Keys
-
-### Recommended Security Practices
-
-1. **Azure Key Vault** (Recommended)
-   ```bash
-   # Create Key Vault
-   az keyvault create --name kv-admaps --resource-group rg-admaps
-   
-   # Store secrets
-   az keyvault secret set --vault-name kv-admaps --name "GoogleMapsApiKey" --value "your-key"
-   az keyvault secret set --vault-name kv-admaps --name "OpenAIApiKey" --value "your-key"
-   ```
-
-2. **App Settings** (Simpler)
-   - Store sensitive data in Azure App Settings
-   - Never commit API keys to version control
-   - Use environment-specific configurations
-
-### Required API Keys
-- **Google Maps API**: Places API, Directions API, Maps JavaScript API
-- **OpenAI API**: For intelligent route optimization (optional)
-
-## 🛠️ Configuration
-
-### Environment Variables
-
-#### Backend (`backend/.env`)
-```bash
-PORT=4001
-GOOGLE_MAPS_API_KEY=your_google_maps_key
-OPENAI_API_KEY=your_openai_key
-JWT_SECRET=your_jwt_secret
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=your_secure_password
-```
-
-#### Frontend (`frontend/.env.local`)
-```bash
-VITE_BACKEND_URL=http://localhost:4001
-VITE_GOOGLE_MAPS_API_KEY=your_google_maps_key
-```
-
-### Production Configuration
-- **HTTPS Required**: Web Share API needs secure context
-- **CORS**: Automatically configured for Azure deployment
-- **Session Management**: 24-hour token expiration
-- **Error Handling**: Automatic logout on auth failures
-
-## 📱 Mobile Features
-
-### Native Sharing
-- **iOS Safari**: Native iOS share sheet
-- **Android Chrome**: Native Android share intent
-- **Desktop**: Clipboard fallback with notification
-
-### Responsive Design
-- **Mobile-First**: Optimized for touch interfaces
-- **Adaptive Layout**: Single-column on mobile, side-by-side on desktop
-- **Touch Gestures**: Full map interaction support
 
 ## 🔧 Development
 
-### Available Scripts
+### Local Setup
+1. Clone the repository
+2. Set up local environment: `./setup-local.sh`
+3. Edit `.env` file with your API keys
+4. Start with Docker Compose: `docker-compose up`
+5. Access at http://localhost:3000
 
-#### Backend
-```bash
-npm start        # Start production server
-npm run dev      # Start development server
-```
+### Environment Variables
+Required environment variables (configure in Azure App Configuration):
+- `OPENAI_API_KEY` - OpenAI API key
+- `GOOGLE_MAPS_API_KEY` - Google Maps API key
+- `JWT_SECRET` - JWT token secret
+- `ADMIN_USERNAME` - Admin login username
+- `ADMIN_PASSWORD` - Admin login password
 
-#### Frontend
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run preview  # Preview production build
-```
+## 🌐 Production
 
-### Development Workflow
-1. Start backend server (`npm start` in backend/)
-2. Start frontend dev server (`npm run dev` in frontend/)
-3. Access application at http://localhost:5173
-4. Backend API available at http://localhost:4001
+**Application URL**: https://pitstoppal-webapp-ckcqehfyd4b2aqfj.eastus2-01.azurewebsites.net
 
-## 📊 Monitoring & Troubleshooting
+### Azure Resources
+- **Resource Group**: `rg-pitstoppal-1`
+- **Web App**: `pitstoppal-webapp`
+- **Container Registry**: `pitstoppalacr`
+- **App Configuration**: `pitstoppal-appconfig`
 
-### Azure Monitoring
-```bash
-# View application logs
-az webapp log tail --name admaps-backend-api --resource-group rg-admaps
+## 📚 Documentation
 
-# Check app status
-az webapp show --name admaps-frontend-app --resource-group rg-admaps --query "state"
-```
-
-### Common Issues
-1. **Maps not loading**: Check Google Maps API key and billing
-2. **Login fails**: Verify JWT secret and credentials
-3. **CORS errors**: Ensure backend URL is correct in frontend
-4. **Share not working**: Requires HTTPS for Web Share API
-
-## 💰 Cost Estimation
-
-### Azure Resources (Monthly)
-- **App Service Plan B1**: ~$13.14
-- **Two Web Apps**: Included in plan
-- **Storage**: ~$0.50
-- **Total**: ~$13.64/month
-
-### API Usage
-- **Google Maps**: Pay-per-use (free tier available)
-- **OpenAI**: Pay-per-use (optional feature)
+- **[DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)** - Complete deployment instructions
+- **[azure-app-config-setup.sh](./azure-app-config-setup.sh)** - Azure App Configuration setup
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Test locally with `./test-local.sh`
+5. Deploy with `./azure-deploy.sh`
+6. Submit a pull request
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Check the [Deployment Plan](DEPLOYMENT_PLAN.md) for detailed setup instructions
-- Review Azure logs for runtime issues
-- Ensure all API keys are properly configured
-- Verify HTTPS is enabled for mobile sharing features
+This project is licensed under the MIT License.
 
 ---
 
-**Built with ❤️ using React, Node.js, Google Maps, and OpenAI**
+**Made with ❤️ for road trips and pit stops!** 🚗💨

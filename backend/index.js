@@ -1,27 +1,53 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 require('dotenv').config();
 
 const OpenAI = require('openai');
 const jwt = require('jsonwebtoken');
 const { authenticateToken, ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET } = require('./middleware/auth');
+const { getConfig } = require('./config.js');
 
 const app = express();
 const PORT = process.env.PORT || 4001;
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // Set this in backend/.env
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY; // Set this in backend/.env
+let openai;
+let GOOGLE_MAPS_API_KEY;
 
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+// Initialize configuration
+async function initializeConfig() {
+  try {
+    const config = await getConfig();
+    
+    if (!config.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY not configured');
+    }
+    
+    if (!config.GOOGLE_MAPS_API_KEY) {
+      throw new Error('GOOGLE_MAPS_API_KEY not configured');
+    }
+    
+    openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
+    GOOGLE_MAPS_API_KEY = config.GOOGLE_MAPS_API_KEY;
+    
+    console.log('Configuration loaded successfully');
+  } catch (error) {
+    console.error('Failed to load configuration:', error);
+    process.exit(1);
+  }
+}
 
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from the frontend build
+app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Login endpoint
+// API Routes
 app.post('/login', (req, res) => {
   console.log('Login attempt:', req.body);
   const { username, password } = req.body;
@@ -559,7 +585,25 @@ function decodePolyline(encoded) {
   return points;
 }
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on port ${PORT}`);
-  console.log('Loaded endpoints: /health, /search');
+// Serve React app for any non-API routes
+app.use((req, res, next) => {
+  // Skip if it's an API route
+  if (req.path.startsWith('/health') || req.path.startsWith('/login') || req.path.startsWith('/search') || req.path.startsWith('/recalculate-route')) {
+    return next();
+  }
+  
+  // Serve index.html for all other routes
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Initialize configuration and start server
+initializeConfig().then(() => {
+  app.listen(PORT, () => {
+    console.log(`Backend server running on port ${PORT}`);
+    console.log('Loaded endpoints: /health, /search');
+    console.log('Serving frontend from /public directory');
+  });
+}).catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 }); 
