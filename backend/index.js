@@ -47,6 +47,75 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+// Test endpoint for location debugging (no auth required)
+app.post('/test-location', async (req, res) => {
+  const { query, userLocation } = req.body;
+  console.log('Test location request:', { query, userLocation });
+  
+  if (!query) return res.status(400).json({ error: 'Missing query' });
+
+  try {
+    // Use OpenAI to extract place type and location
+    const prompt = `Extract the type of place and location from this search: "${query}". 
+    If the query mentions a specific location (like "coffee shops in Singapore" or "restaurants in New York"), use that location.
+    If the query doesn't mention a specific location (like "coffee shops" or "gas stations"), respond with location: "nearby".
+    Respond as JSON with 'type' and 'location'.`;
+    
+    const aiResp = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2,
+    });
+    const aiText = aiResp.choices[0].message.content;
+    let parsed;
+    try {
+      parsed = JSON.parse(aiText);
+    } catch (e) {
+      return res.status(500).json({ error: 'Failed to parse AI response', aiText });
+    }
+    
+    // Determine search location
+    let searchLocation;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Use the specific location mentioned in the query
+      searchLocation = parsed.location;
+    } else if (userLocation && userLocation.lat && userLocation.lng) {
+      // Use user's current location for nearby searches
+      searchLocation = `${userLocation.lat},${userLocation.lng}`;
+    } else {
+      // Fallback to a default location if no user location available
+      searchLocation = 'Singapore';
+    }
+    
+    // Build search query
+    let searchQuery;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Specific location mentioned
+      searchQuery = encodeURIComponent(`${parsed.type} in ${parsed.location}`);
+    } else {
+      // Nearby search using user's location
+      searchQuery = encodeURIComponent(`${parsed.type} near ${searchLocation}`);
+    }
+    
+    // Call Google Places API
+    let url;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Use Text Search for specific locations
+      url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+    } else {
+      // Use Nearby Search for user's current location
+      url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=5000&type=cafe&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
+    }
+    console.log('Test Search URL:', url);
+    const placesResp = await fetch(url);
+    const placesData = await placesResp.json();
+    console.log('Test Google Places API response:', JSON.stringify(placesData, null, 2));
+    res.json({ parsed, aiText, places: placesData.results || [], searchLocation });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // API Routes
 app.post('/login', (req, res) => {
   console.log('Login attempt:', req.body);
@@ -74,12 +143,18 @@ app.post('/login', (req, res) => {
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 app.post('/search', authenticateToken, async (req, res) => {
-  const { query } = req.body;
+  const { query, userLocation } = req.body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
+
+  console.log('Search request:', { query, userLocation });
 
   try {
     // Use OpenAI to extract place type and location
-    const prompt = `Extract the type of place and location from this search: "${query}". Respond as JSON with 'type' and 'location'.`;
+    const prompt = `Extract the type of place and location from this search: "${query}". 
+    If the query mentions a specific location (like "coffee shops in Singapore" or "restaurants in New York"), use that location.
+    If the query doesn't mention a specific location (like "coffee shops" or "gas stations"), respond with location: "nearby".
+    Respond as JSON with 'type' and 'location'.`;
+    
     const aiResp = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages: [{ role: 'user', content: prompt }],
@@ -92,14 +167,44 @@ app.post('/search', authenticateToken, async (req, res) => {
     } catch (e) {
       return res.status(500).json({ error: 'Failed to parse AI response', aiText });
     }
-    // Call Google Places API with parsed.type and parsed.location
-    const searchQuery = encodeURIComponent(`${parsed.type} in ${parsed.location}`);
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
-    console.log(url);
+    
+    // Determine search location
+    let searchLocation;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Use the specific location mentioned in the query
+      searchLocation = parsed.location;
+    } else if (userLocation && userLocation.lat && userLocation.lng) {
+      // Use user's current location for nearby searches
+      searchLocation = `${userLocation.lat},${userLocation.lng}`;
+    } else {
+      // Fallback to a default location if no user location available
+      searchLocation = 'Singapore';
+    }
+    
+    // Build search query
+    let searchQuery;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Specific location mentioned
+      searchQuery = encodeURIComponent(`${parsed.type} in ${parsed.location}`);
+    } else {
+      // Nearby search using user's location
+      searchQuery = encodeURIComponent(`${parsed.type} near ${searchLocation}`);
+    }
+    
+    // Call Google Places API
+    let url;
+    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
+      // Use Text Search for specific locations
+      url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+    } else {
+      // Use Nearby Search for user's current location
+      url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=5000&type=cafe&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
+    }
+    console.log('Search URL:', url);
     const placesResp = await fetch(url);
     const placesData = await placesResp.json();
     console.log('Google Places API response:', JSON.stringify(placesData, null, 2));
-    res.json({ parsed, aiText, places: placesData.results || [] });
+    res.json({ parsed, aiText, places: placesData.results || [], searchLocation });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -151,7 +256,27 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     - "Breakfast near Kolaghat" → {"type": "breakfast restaurant", "timing": null, "distance": null, "location": "Kolaghat", "detourPreference": "minimal"}
     - "Lunch in Durgapur after 3hrs" → {"type": "lunch restaurant", "timing": 3, "distance": null, "location": "Durgapur", "detourPreference": "minimal"}
     - "Gas station after 200km near Durgapur" → {"type": "gas station", "timing": null, "distance": 200, "location": "Durgapur", "detourPreference": "minimal"}
-    
+    - "Find a coffee shop with outdoor seating 10 minutes off my route." → {"type": "coffee shop", "timing": null, "distance": null, "location": null, "detourPreference": "moderate", "features": ["outdoor seating"]}
+    - "Show me gas stations with clean restrooms along my drive to Kuala Lumpur." → {"type": "gas station", "timing": null, "distance": null, "location": "Kuala Lumpur", "detourPreference": "minimal", "features": ["clean restrooms"]}
+    - "Where can I stop for a quick meal between Singapore and Johor Bahru?" → {"type": "restaurant", "timing": null, "distance": null, "location": "between Singapore and Johor Bahru", "detourPreference": "minimal", "features": ["quick meal"]}
+    - "Any scenic viewpoints or nature trails near my route?" → {"type": "scenic stop", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["viewpoint", "nature trail"]}
+    - "Suggest a quiet park to relax halfway through my trip." → {"type": "park", "timing": "halfway", "distance": null, "location": null, "detourPreference": "minimal", "features": ["quiet", "relax"]}
+    - "Find a lake or beach I can detour to for 30 minutes." → {"type": "lake or beach", "timing": null, "distance": null, "location": null, "detourPreference": "moderate", "duration": 30}
+    - "Show vegetarian restaurants with parking near my route." → {"type": "vegetarian restaurant", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["parking"]}
+    - "Find a kid-friendly restaurant with a play area on the way." → {"type": "restaurant", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["kid-friendly", "play area"]}
+    - "Any halal food options close to my current path?" → {"type": "halal restaurant", "timing": null, "distance": null, "location": null, "detourPreference": "minimal"}
+    - "Where can I stop for groceries or snacks on this route?" → {"type": "grocery or convenience store", "timing": null, "distance": null, "location": null, "detourPreference": "minimal"}
+    - "Find a pharmacy near my route that's open now." → {"type": "pharmacy", "timing": "now", "distance": null, "location": null, "detourPreference": "minimal", "features": ["open now"]}
+    - "Any shopping malls I can visit without a big detour?" → {"type": "shopping mall", "timing": null, "distance": null, "location": null, "detourPreference": "minimal"}
+    - "Suggest budget hotels near my route for an overnight stay." → {"type": "budget hotel", "timing": "overnight", "distance": null, "location": null, "detourPreference": "minimal"}
+    - "Find a rest stop with sleeping pods or lounges." → {"type": "rest stop", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["sleeping pods", "lounges"]}
+    - "Any motels with EV charging stations on the way?" → {"type": "motel", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["EV charging"]}
+    - "Show me interesting places I can visit with a 15-minute detour." → {"type": "point of interest", "timing": null, "distance": null, "location": null, "detourPreference": "15-minute"}
+    - "Find stops that won't add more than 10 minutes to my trip." → {"type": "any", "timing": null, "distance": null, "location": null, "detourPreference": "10-minute max"}
+    - "What's the best place to take a break halfway through my journey?" → {"type": "rest stop", "timing": "halfway", "distance": null, "location": null, "detourPreference": "minimal"}
+    - "Find wheelchair-accessible restrooms along my route." → {"type": "restroom", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["wheelchair-accessible"]}
+    - "Any baby-changing stations or family-friendly stops nearby?" → {"type": "family stop", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["baby-changing", "family-friendly"]}
+    - "Suggest a pet-friendly café on the way."  → {"type": "café", "timing": null, "distance": null, "location": null, "detourPreference": "minimal", "features": ["pet-friendly"]}
     Respond only with valid JSON.`;
     
     const aiResp = await openai.chat.completions.create({

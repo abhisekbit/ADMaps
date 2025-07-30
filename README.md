@@ -39,6 +39,7 @@ docker-compose up
 - **Smart Route Planning**: Find optimal stops for fuel, food, and rest
 - **Real-time Navigation**: Google Maps integration
 - **AI-Powered Search**: OpenAI integration for intelligent recommendations
+- **Location-Aware Search**: Automatically uses your current location for nearby searches
 - **Responsive Design**: Works on desktop and mobile
 - **Secure Authentication**: JWT-based login system
 

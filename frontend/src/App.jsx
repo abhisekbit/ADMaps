@@ -245,6 +245,38 @@ function AuthenticatedApp() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Auto-detect user location on app load
+  React.useEffect(() => {
+    console.log('Starting auto-location detection...');
+    if (navigator.geolocation && window.isSecureContext) {
+      console.log('Geolocation available, requesting position...');
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const userLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          console.log('✅ Auto-detected user location:', userLocation);
+          setCurrentLocation(userLocation);
+          setMapCenter(userLocation);
+        },
+        (error) => {
+          console.log('❌ Auto-location detection failed:', error.message);
+          console.log('Keeping Singapore as fallback location');
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 300000 // 5 minutes
+        }
+      );
+    } else {
+      console.log('❌ Geolocation not available or not secure context');
+      console.log('isSecureContext:', window.isSecureContext);
+      console.log('navigator.geolocation:', !!navigator.geolocation);
+    }
+  }, []);
+
 
 
   const handleSearch = async (e) => {
@@ -252,6 +284,12 @@ function AuthenticatedApp() {
     setLoading(true);
     setError("");
     setPlaces([]);
+    
+    console.log('🔍 Search request details:');
+    console.log('  Query:', search);
+    console.log('  Current Location:', currentLocation);
+    console.log('  Map Center:', mapCenter);
+    
     try {
       const resp = await fetch('/search', {
         method: "POST",
@@ -259,7 +297,10 @@ function AuthenticatedApp() {
           "Content-Type": "application/json",
           ...getAuthHeader()
         },
-        body: JSON.stringify({ query: search })
+        body: JSON.stringify({ 
+          query: search,
+          userLocation: currentLocation // Send user's current location
+        })
       });
       
       const handledResp = await handleApiResponse(resp);
