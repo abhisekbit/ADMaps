@@ -186,6 +186,7 @@ const getPlacePhotoUrl = (photoRef, maxWidth = 80) =>
 
 // Main authenticated app component
 function AuthenticatedApp() {
+  console.log('🚀 AuthenticatedApp component loaded!');
   const { getAuthHeader, logout } = useAuth();
 
   // Helper function to handle API responses with auth error handling
@@ -248,6 +249,11 @@ function AuthenticatedApp() {
   // Auto-detect user location on app load
   React.useEffect(() => {
     console.log('Starting auto-location detection...');
+    console.log('isSecureContext:', window.isSecureContext);
+    console.log('navigator.geolocation:', !!navigator.geolocation);
+    console.log('window.location.protocol:', window.location.protocol);
+    console.log('window.location.hostname:', window.location.hostname);
+    
     if (navigator.geolocation && window.isSecureContext) {
       console.log('Geolocation available, requesting position...');
       navigator.geolocation.getCurrentPosition(
@@ -262,6 +268,7 @@ function AuthenticatedApp() {
         },
         (error) => {
           console.log('❌ Auto-location detection failed:', error.message);
+          console.log('Error code:', error.code);
           console.log('Keeping Singapore as fallback location');
         },
         {
@@ -289,6 +296,7 @@ function AuthenticatedApp() {
     console.log('  Query:', search);
     console.log('  Current Location:', currentLocation);
     console.log('  Map Center:', mapCenter);
+    console.log('  Location Source:', currentLocation === singaporeCenter ? 'Default (Singapore)' : 'User Location');
     
     try {
       const resp = await fetch('/search', {
@@ -606,6 +614,11 @@ function AuthenticatedApp() {
   };
 
   const handleResetToCurrentLocation = () => {
+    console.log('Manual location detection triggered...');
+    console.log('isSecureContext:', window.isSecureContext);
+    console.log('navigator.geolocation:', !!navigator.geolocation);
+    console.log('window.location.protocol:', window.location.protocol);
+    
     if (navigator.geolocation && window.isSecureContext) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -613,12 +626,14 @@ function AuthenticatedApp() {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
           };
+          console.log('✅ Manual location detection successful:', newLocation);
           setCurrentLocation(newLocation);
           setMapCenter(newLocation);
           setError(""); // Clear any previous errors
         },
         (error) => {
-          console.error('Error getting location:', error);
+          console.error('❌ Manual location detection failed:', error);
+          console.error('Error code:', error.code);
           let errorMessage = "Unable to get current location. ";
           if (error.code === 1) {
             errorMessage += "Location access denied.";
@@ -634,6 +649,7 @@ function AuthenticatedApp() {
       );
     } else {
       // Fallback when geolocation is not available or not secure
+      console.error('❌ Geolocation not available for manual detection');
       setError("Geolocation requires HTTPS. Using default location.");
       setMapCenter(singaporeCenter);
     }
@@ -2263,6 +2279,7 @@ function AuthenticatedApp() {
 
 // App wrapper with authentication
 function App() {
+  console.log('🎯 Main App component loaded!');
   return (
     <AuthProvider>
       <AppWithAuth />
