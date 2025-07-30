@@ -42,16 +42,18 @@ const createAppTheme = (darkMode) => createTheme({
     mode: darkMode ? 'dark' : 'light',
     primary: {
       main: '#007aff', // Apple blue
+      light: '#4da6ff',
+      dark: '#0056cc',
     },
     secondary: {
-      main: darkMode ? '#8e8e93' : '#e5e5ea', // Apple gray
+      main: '#007aff', // Use blue as secondary too
     },
     background: {
-      default: darkMode ? '#000000' : '#f8f8f8',
-      paper: darkMode ? '#1c1c1e' : '#fff',
+      default: darkMode ? '#0a0a0a' : '#f0f8ff', // Blue tint
+      paper: darkMode ? '#1a1a2e' : '#ffffff',
     },
     text: {
-      primary: darkMode ? '#ffffff' : '#111',
+      primary: darkMode ? '#ffffff' : '#1a1a1a',
       secondary: darkMode ? '#8e8e93' : '#6e6e73',
     },
   },
@@ -292,6 +294,18 @@ function AuthenticatedApp() {
     setError("");
     setPlaces([]);
     
+    // Reset map state when new search is performed
+    setRoutePolyline(null);
+    setEncodedPolyline(null);
+    setRouteSteps([]);
+    setSelectedPlace(null);
+    setAddedStops([]);
+    setSearchMarkers([]);
+    setSuggestedStops([]);
+    setSearchInfo(null);
+    setRouteInfo(null);
+    setRouteKey(prev => prev + 1);
+    
     console.log('🔍 Search request details:');
     console.log('  Query:', search);
     console.log('  Current Location:', currentLocation);
@@ -317,9 +331,38 @@ function AuthenticatedApp() {
       const data = await handledResp.json();
       if (data.error) throw new Error(data.error);
       setPlaces(data.places || []);
+      
+      // Show all search results on the map
       if (data.places && data.places.length > 0) {
+        // Create markers for all search results
+        const markers = data.places.map((place, index) => ({
+          id: place.place_id || `search-${index}`,
+          position: {
+            lat: place.geometry.location.lat,
+            lng: place.geometry.location.lng
+          },
+          title: place.name,
+          type: 'search-result'
+        }));
+        setSearchMarkers(markers);
+        
+        // Set map center to first result
         const first = data.places[0].geometry.location;
         setMapCenter({ lat: first.lat, lng: first.lng });
+        
+        // Fit bounds to show all results
+        if (mapRef.current && data.places.length > 1) {
+          setTimeout(() => {
+            const bounds = new window.google.maps.LatLngBounds();
+            data.places.forEach(place => {
+              bounds.extend(new window.google.maps.LatLng(
+                place.geometry.location.lat,
+                place.geometry.location.lng
+              ));
+            });
+            mapRef.current.fitBounds(bounds);
+          }, 300);
+        }
       }
     } catch (err) {
       setError(err.message || "Failed to search");
@@ -1059,12 +1102,13 @@ function AuthenticatedApp() {
   // Consistent TextField styling
   const textFieldSx = {
     '& .MuiOutlinedInput-root': {
-      borderRadius: 0,
+      borderRadius: 2,
       backgroundColor: darkMode ? 'rgba(255,255,255,0.05)' : '#f4f4f7',
       fontSize: '1rem',
       minHeight: '56px',
       '& fieldset': {
         borderColor: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+        borderRadius: 2,
       },
       '&:hover fieldset': {
         borderColor: darkMode ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.2)',
@@ -1074,6 +1118,23 @@ function AuthenticatedApp() {
         borderWidth: '2px',
       },
     },
+    '& .MuiAutocomplete-paper': {
+      borderRadius: 2,
+      boxShadow: darkMode 
+        ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+        : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+      '& .MuiAutocomplete-option': {
+        borderRadius: 1,
+        margin: '1px 4px',
+        '&:hover': {
+          backgroundColor: darkMode ? 'rgba(0,122,255,0.1)' : 'rgba(0,122,255,0.05)',
+        },
+        '&.Mui-focused': {
+          backgroundColor: darkMode ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.1)',
+        }
+      }
+    }
   };
 
   return (
@@ -1105,7 +1166,7 @@ function AuthenticatedApp() {
           justifyContent: 'center',
           background: darkMode 
             ? 'linear-gradient(135deg, rgba(30, 30, 30, 1) 0%, rgba(15, 15, 15, 1) 100%)'
-            : 'linear-gradient(135deg, rgba(255, 87, 34, 1) 0%, rgba(255, 152, 0, 1) 100%)',
+            : 'linear-gradient(135deg, rgba(0, 122, 255, 1) 0%, rgba(77, 166, 255, 1) 100%)',
           zIndex: 9999,
           animation: 'fadeIn 0.5s ease-in-out'
         }}>
@@ -1144,8 +1205,8 @@ function AuthenticatedApp() {
           {/* App Name */}
           <Typography variant="h2" sx={{
             fontWeight: 800,
-            letterSpacing: '-2px',
-            fontFamily: '"SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif',
+            letterSpacing: '2px',
+            fontFamily: 'Courier New, Monaco, Menlo, Consolas, monospace',
             color: 'white',
             textShadow: '0 2px 8px rgba(0,0,0,0.4)',
             fontSize: { xs: '2.5rem', sm: '3rem', md: '3.5rem' },
@@ -1168,7 +1229,7 @@ function AuthenticatedApp() {
             maxWidth: '600px',
             px: 2
           }}>
-            Your cheeky co-pilot for pee, petrol, and pakoras
+            Your Smart Travel Companion
           </Typography>
           
           {/* Loading indicator */}
@@ -1194,46 +1255,54 @@ function AuthenticatedApp() {
         flexDirection: 'column', 
         overflow: { xs: 'visible', md: 'hidden' } 
       }}>
-        {/* Slim Header with Icon-inspired Background */}
+        {/* Professional Header */}
         <Box sx={{ 
           color: 'white', 
-          py: 1, 
+          py: 2, 
           px: 3, 
           display: 'flex', 
           alignItems: 'center',
           justifyContent: 'space-between',
           zIndex: 1000,
           background: darkMode 
-            ? 'rgba(30, 30, 30, 1)'
-            : 'rgba(255, 87, 34, 1)',
+            ? 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)'
+            : 'linear-gradient(135deg, #007aff 0%, #0056cc 100%)',
           position: 'relative',
           overflow: 'hidden',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          boxShadow: darkMode 
+            ? '0 4px 20px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.2)' 
+            : '0 4px 20px rgba(0,122,255,0.2), 0 2px 8px rgba(0,122,255,0.1)',
+          borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.2)'}`
         }}>          
           {/* Spacer for mobile */}
           <Box sx={{ width: { xs: '32px', md: '60px' } }} />
           
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <Box 
               component="img"
               src={pitStopPalIcon}
               alt="PitStopPal"
               sx={{
-                width: { xs: '28px', sm: '32px', md: '36px' },
-                height: { xs: '28px', sm: '32px', md: '36px' },
-                borderRadius: '6px',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-                filter: 'brightness(1.05)'
+                width: { xs: '32px', sm: '36px', md: '40px' },
+                height: { xs: '32px', sm: '36px', md: '40px' },
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                filter: 'brightness(1.1)',
+                transition: 'transform 0.2s ease',
+                '&:hover': {
+                  transform: 'scale(1.05)'
+                }
               }}
             />
-            <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-              <Typography variant="h4" sx={{ 
-                fontWeight: 800, 
-                letterSpacing: '-1px',
-                fontFamily: '"SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif',
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+              <Typography variant="h3" sx={{ 
+                fontWeight: 900, 
+                letterSpacing: '2px',
+                fontFamily: 'Courier New, Monaco, Menlo, Consolas, monospace',
                 color: 'white',
-                textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                fontSize: { xs: '1.2rem', sm: '1.5rem', md: '1.8rem' }
+                textShadow: '0 3px 6px rgba(0,0,0,0.4)',
+                fontSize: { xs: '1.8rem', sm: '2.2rem', md: '2.6rem' },
+                lineHeight: 1.1
               }}>
                 PitStopPal
               </Typography>
@@ -1241,33 +1310,38 @@ function AuthenticatedApp() {
                 fontWeight: 400, 
                 letterSpacing: '0.3px',
                 fontFamily: '"SF Pro Display", "Inter", "Helvetica Neue", Arial, sans-serif',
-                color: 'rgba(255,255,255,0.85)',
-                textShadow: '0 1px 2px rgba(0,0,0,0.2)',
-                fontSize: { xs: '0.65rem', sm: '0.7rem', md: '0.75rem' },
-                fontStyle: 'italic',
+                color: 'rgba(255,255,255,0.8)',
+                textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                fontSize: { xs: '0.6rem', sm: '0.65rem', md: '0.7rem' },
                 display: { xs: 'none', sm: 'block' }
               }}>
-                Your cheeky co-pilot for pee, petrol, and pakoras
+                Your Smart Travel Companion
               </Typography>
             </Box>
           </Box>
 
-          <Box sx={{ display: 'flex', gap: 1 }}>
+          <Box sx={{ display: 'flex', gap: 1.5 }}>
             {/* Logout Button */}
             <Button
               onClick={logout}
               sx={{
                 minWidth: 'auto',
-                width: { xs: '32px', md: '70px' },
-                height: '32px',
-                borderRadius: '16px',
+                width: { xs: '36px', md: '80px' },
+                height: '36px',
+                borderRadius: '18px',
                 color: 'white',
                 bgcolor: 'rgba(255,255,255,0.15)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(10px)',
                 '&:hover': {
                   bgcolor: 'rgba(255,255,255,0.25)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                 },
                 fontSize: '0.8rem',
-                px: { xs: 0, md: 1 }
+                px: { xs: 0, md: 1 },
+                transition: 'all 0.2s ease'
               }}
               title="Logout"
             >
@@ -1280,15 +1354,21 @@ function AuthenticatedApp() {
               onClick={() => setDarkMode(!darkMode)}
               sx={{
                 minWidth: 'auto',
-                width: { xs: '32px', md: '60px' },
-                height: '32px',
-                borderRadius: '16px',
+                width: { xs: '36px', md: '60px' },
+                height: '36px',
+                borderRadius: '18px',
                 color: 'white',
                 bgcolor: 'rgba(255,255,255,0.15)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(10px)',
                 '&:hover': {
                   bgcolor: 'rgba(255,255,255,0.25)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                  transform: 'translateY(-1px)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
                 },
-                fontSize: '1rem'
+                fontSize: '1rem',
+                transition: 'all 0.2s ease'
               }}
               title={darkMode ? 'Light Mode' : 'Dark Mode'}
             >
@@ -1337,7 +1417,7 @@ function AuthenticatedApp() {
                 <TextField
                   fullWidth
                   variant="outlined"
-                  label="Search for places"
+                  label="Search for Places in natural language"
                   placeholder="e.g., Find a Coffee shop in Singapore near the Marina Bay Sands"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
@@ -1378,53 +1458,178 @@ function AuthenticatedApp() {
                   <DirectionsIcon sx={{ color: 'primary.main' }} />
                   Search Results
                 </Typography>
-                <Paper elevation={1} sx={{ borderRadius: 0, bgcolor: theme.palette.background.paper, maxHeight: 300, overflowY: 'auto' }}>
+                <Paper elevation={6} sx={{ 
+                  borderRadius: 2, 
+                  bgcolor: theme.palette.background.paper, 
+                  maxHeight: 400, 
+                  overflowY: 'auto',
+                  boxShadow: darkMode 
+                    ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                    : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
+                }}>
                   <List sx={{ p: 0 }}>
                     {places.slice(0, 10).map((place, idx) => (
                       <React.Fragment key={place.place_id || idx}>
-                        <ListItem sx={{ alignItems: 'flex-start' }}>
-                          <Avatar sx={{ mr: 2, width: 48, height: 48 }}>
+                        <ListItem sx={{ 
+                          alignItems: 'flex-start',
+                          p: 3,
+                          borderBottom: idx < places.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
+                          '&:hover': {
+                            bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                            transition: 'all 0.3s ease',
+                            transform: 'translateY(-1px)',
+                            boxShadow: darkMode 
+                              ? '0 4px 12px rgba(0,0,0,0.3)' 
+                              : '0 4px 12px rgba(0,0,0,0.1)'
+                          }
+                        }}>
+                          <Avatar sx={{ 
+                            mr: 3, 
+                            width: 64, 
+                            height: 64,
+                            borderRadius: 2,
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                            border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                          }}>
                             {place.photos && place.photos[0] ? (
                               <img 
-                                src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=48&photo_reference=${place.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
+                                src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${place.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
                                 alt={place.name}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
                               />
                             ) : (
-                              <SearchIcon />
+                              <SearchIcon sx={{ fontSize: '1.5rem' }} />
                             )}
                           </Avatar>
-                          <ListItemText
-                            primary={place.name}
-                            secondary={<>
-                              {place.formatted_address}<br/>
-                              <Rating value={place.rating || 0} precision={0.1} readOnly size="small" />
-                              {place.user_ratings_total ? ` (${place.user_ratings_total} ratings)` : ''}
-                            </>}
-                          />
+                          <Box sx={{ flex: 1, minWidth: 0 }}>
+                            <Typography variant="h6" sx={{ 
+                              fontWeight: 700, 
+                              mb: 1,
+                              color: theme.palette.text.primary,
+                              fontSize: '1.1rem',
+                              lineHeight: 1.3
+                            }}>
+                              {place.name}
+                            </Typography>
+                            <Typography variant="body2" sx={{ 
+                              color: theme.palette.text.secondary, 
+                              mb: 1.5, 
+                              display: 'block',
+                              fontSize: '0.9rem',
+                              lineHeight: 1.4
+                            }}>
+                              {place.formatted_address}
+                            </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <Rating 
+                                  value={place.rating || 0} 
+                                  precision={0.1} 
+                                  readOnly 
+                                  size="small"
+                                  sx={{ 
+                                    '& .MuiRating-iconFilled': {
+                                      color: '#FFD700'
+                                    }
+                                  }}
+                                />
+                                <Typography variant="body2" sx={{ 
+                                  color: theme.palette.text.secondary,
+                                  fontWeight: 500,
+                                  fontSize: '0.85rem'
+                                }}>
+                                  {place.rating ? `${place.rating.toFixed(1)}` : 'No rating'}
+                                </Typography>
+                              </Box>
+                              {place.user_ratings_total && (
+                                <Typography variant="body2" sx={{ 
+                                  color: theme.palette.text.secondary,
+                                  fontSize: '0.85rem'
+                                }}>
+                                  • {place.user_ratings_total} reviews
+                                </Typography>
+                              )}
+                            </Box>
+                            {/* Ranking info for nearby searches */}
+                            {place._ranking && (
+                              <Box sx={{ 
+                                display: 'flex', 
+                                gap: 1, 
+                                flexWrap: 'wrap',
+                                mb: 1.5
+                              }}>
+                                <Box sx={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: 0.5,
+                                  bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.1)',
+                                  px: 1.5,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+                                }}>
+                                  <Typography variant="caption" sx={{ 
+                                    color: 'success.main',
+                                    fontWeight: 600,
+                                    fontSize: '0.75rem'
+                                  }}>
+                                    🏆 Score: {place._ranking.totalScore}
+                                  </Typography>
+                                </Box>
+                                <Box sx={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: 0.5,
+                                  bgcolor: darkMode ? 'rgba(33,150,243,0.15)' : 'rgba(33,150,243,0.1)',
+                                  px: 1.5,
+                                  py: 0.5,
+                                  borderRadius: 1,
+                                  border: `1px solid ${darkMode ? 'rgba(33,150,243,0.3)' : 'rgba(33,150,243,0.2)'}`
+                                }}>
+                                  <Typography variant="caption" sx={{ 
+                                    color: 'primary.main',
+                                    fontWeight: 600,
+                                    fontSize: '0.75rem'
+                                  }}>
+                                    📍 {place._ranking.distance}km away
+                                  </Typography>
+                                </Box>
+                              </Box>
+                            )}
+                          </Box>
                           <Button
                             variant="contained"
-                            size="small"
+                            size="medium"
                             onClick={() => handleNavigateClick(place)}
                             startIcon={<DirectionsIcon />}
                             sx={{
-                              ml: 1,
+                              ml: 2,
                               minWidth: 'auto',
-                              px: 2,
-                              py: 0.5,
-                              fontSize: '0.75rem',
+                              px: 3,
+                              py: 1,
+                              fontSize: '0.875rem',
                               fontWeight: 600,
                               borderRadius: 2,
                               bgcolor: '#007AFF',
+                              boxShadow: '0 4px 16px rgba(0, 122, 255, 0.3)',
                               '&:hover': {
                                 bgcolor: '#0056CC',
-                              }
+                                boxShadow: '0 6px 20px rgba(0, 122, 255, 0.4)',
+                                transform: 'translateY(-2px)'
+                              },
+                              '&:active': {
+                                transform: 'translateY(0)'
+                              },
+                              transition: 'all 0.3s ease'
                             }}
                           >
                             Navigate
                           </Button>
                         </ListItem>
-                        {idx < places.length - 1 && <Divider />}
+                        {idx < places.length - 1 && (
+                          <Divider sx={{ mx: 2, borderColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
+                        )}
                       </React.Fragment>
                     ))}
                   </List>
@@ -1434,7 +1639,16 @@ function AuthenticatedApp() {
 
             {/* Starting Point Input Modal */}
             {showStartingPointInput && selectedPlace && (
-              <Paper elevation={3} sx={{ p: 3, mb: 3, borderRadius: 0, bgcolor: theme.palette.background.paper }}>
+              <Paper elevation={6} sx={{ 
+                p: 3, 
+                mb: 3, 
+                borderRadius: 2, 
+                bgcolor: theme.palette.background.paper,
+                boxShadow: darkMode 
+                  ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                  : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
+              }}>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: theme.palette.text.primary }}>
                   Navigate to {selectedPlace.name}
                 </Typography>
@@ -1557,15 +1771,15 @@ function AuthenticatedApp() {
 
             {/* Route Information */}
             {routeInfo && (
-              <Paper elevation={4} sx={{ 
+              <Paper elevation={6} sx={{ 
                 p: 2, 
                 mb: 2, 
-                borderRadius: 0, 
+                borderRadius: 2, 
                 bgcolor: darkMode ? 'rgba(46, 125, 50, 0.1)' : '#e8f5e8',
                 boxShadow: darkMode 
-                  ? '0 8px 24px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.15)'
-                  : '0 8px 24px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
-                border: darkMode ? '1px solid rgba(46, 125, 50, 0.2)' : 'none'
+                  ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                  : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
               }}>
                 <Box sx={{ 
                   display: 'flex', 
@@ -1658,7 +1872,20 @@ function AuthenticatedApp() {
               <Accordion 
                 expanded={searchAlongRouteOpen} 
                 onChange={() => setSearchAlongRouteOpen(!searchAlongRouteOpen)}
-                sx={{ mb: 2 }}
+                sx={{ 
+                  mb: 2,
+                  borderRadius: 2,
+                  boxShadow: darkMode 
+                    ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                    : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+                  '& .MuiAccordionSummary-root': {
+                    borderRadius: 2,
+                  },
+                  '& .MuiAccordionDetails-root': {
+                    borderRadius: 2,
+                  }
+                }}
               >
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="h6" sx={{ 
@@ -1669,7 +1896,7 @@ function AuthenticatedApp() {
                     gap: 1
                   }}>
                     <SearchIcon sx={{ color: 'primary.main' }} />
-                    Search Along Route
+                    Search Along Route in natural language
                   </Typography>
                 </AccordionSummary>
                 <AccordionDetails>
@@ -1677,7 +1904,7 @@ function AuthenticatedApp() {
                     <TextField
                       fullWidth
                       variant="outlined"
-                      label="Search for stops along your route"
+                      label="Search for stops along your route in natural language"
                       placeholder="e.g., Find me an Indian Restaurant along the route without a detour"
                       value={stopQuery}
                       onChange={e => setStopQuery(e.target.value)}
@@ -1816,13 +2043,15 @@ function AuthenticatedApp() {
                   
                   {/* Suggested Stops */}
                   {suggestedStops.length > 0 && (
-                    <Paper elevation={4} sx={{ 
-                      p: 0, 
-                      borderRadius: 0, 
-                      bgcolor: 'background.paper',
+                    <Paper elevation={6} sx={{ 
+                      borderRadius: 2, 
+                      bgcolor: theme.palette.background.paper, 
+                      maxHeight: 400, 
+                      overflowY: 'auto',
                       boxShadow: darkMode 
-                        ? '0 8px 24px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.15)'
-                        : '0 8px 24px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
+                        ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                        : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
                       overflow: 'hidden'
                     }}>
                       <Box sx={{ p: 2, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, bgcolor: darkMode ? 'rgba(0,122,255,0.1)' : 'rgba(0,122,255,0.05)' }}>
@@ -1830,99 +2059,130 @@ function AuthenticatedApp() {
                           🎯 Suggested Stops
                         </Typography>
                       </Box>
-                      <List sx={{ maxHeight: 300, overflowY: 'auto', p: 0 }}>
+                      <List sx={{ p: 0 }}>
                         {suggestedStops.map((stop, idx) => (
                           <Box key={stop.place_id || idx}>
                             <ListItem sx={{ 
-                              alignItems: 'flex-start', 
-                              p: 2,
+                              alignItems: 'flex-start',
+                              p: 3,
+                              borderBottom: idx < suggestedStops.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
                               '&:hover': {
-                                bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'
+                                bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                transition: 'all 0.3s ease',
+                                transform: 'translateY(-1px)',
+                                boxShadow: darkMode 
+                                  ? '0 4px 12px rgba(0,0,0,0.3)' 
+                                  : '0 4px 12px rgba(0,0,0,0.1)'
                               }
                             }}>
-                              {/* Place Photo */}
-                              <Avatar
-                                sx={{ 
-                                  mr: 2, 
-                                  width: 56, 
-                                  height: 56, 
-                                  borderRadius: 2,
-                                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-                                }}
-                              >
+                              <Avatar sx={{ 
+                                mr: 3, 
+                                width: 64, 
+                                height: 64,
+                                borderRadius: 2,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                              }}>
                                 {stop.photos && stop.photos[0] ? (
                                   <img 
-                                    src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=112&photo_reference=${stop.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
+                                    src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${stop.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
                                     alt={stop.name}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
                                   />
                                 ) : (
-                                  <SearchIcon sx={{ color: 'text.secondary' }} />
+                                  <SearchIcon sx={{ fontSize: '1.5rem' }} />
                                 )}
                               </Avatar>
-                              
-                              <ListItemText
-                                primary={
-                                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5, color: 'text.primary' }}>
-                                    {stop.name}
-                                  </Typography>
-                                }
-                                secondary={
-                                  <Box>
-                                    <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
-                                      {stop.formatted_address}
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography variant="h6" sx={{ 
+                                  fontWeight: 700, 
+                                  mb: 1,
+                                  color: theme.palette.text.primary,
+                                  fontSize: '1.1rem',
+                                  lineHeight: 1.3
+                                }}>
+                                  {stop.name}
+                                </Typography>
+                                <Typography variant="body2" sx={{ 
+                                  color: theme.palette.text.secondary, 
+                                  mb: 1.5, 
+                                  display: 'block',
+                                  fontSize: '0.9rem',
+                                  lineHeight: 1.4
+                                }}>
+                                  {stop.formatted_address}
+                                </Typography>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Rating 
+                                      value={stop.rating || 0} 
+                                      precision={0.1} 
+                                      readOnly 
+                                      size="small"
+                                      sx={{ 
+                                        '& .MuiRating-iconFilled': {
+                                          color: '#FFD700'
+                                        }
+                                      }}
+                                    />
+                                    <Typography variant="body2" sx={{ 
+                                      color: theme.palette.text.secondary,
+                                      fontWeight: 500,
+                                      fontSize: '0.85rem'
+                                    }}>
+                                      {stop.rating ? `${stop.rating.toFixed(1)}` : 'No rating'}
                                     </Typography>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                      <Rating value={stop.rating || 0} precision={0.1} readOnly size="small" />
-                                      {stop.user_ratings_total && (
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                          ({stop.user_ratings_total})
-                                        </Typography>
-                                      )}
-                                    </Box>
-                                    <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', mt: 0.5 }}>
-                                      <Box sx={{ 
-                                        display: 'flex', 
-                                        alignItems: 'center', 
-                                        gap: 0.5,
-                                        bgcolor: darkMode ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
-                                        px: 1.5,
-                                        py: 0.5,
-                                        borderRadius: 0,
-                                        border: `1px solid ${darkMode ? 'rgba(0,122,255,0.3)' : 'rgba(0,122,255,0.2)'}`
-                                      }}>
-                                        <Typography variant="caption" sx={{ 
-                                          color: 'primary.main', 
-                                          fontWeight: 600,
-                                          fontSize: '0.75rem'
-                                        }}>
-                                          📍 {stop.distanceFromRoute ? `${stop.distanceFromRoute.toFixed(1)}km from route` : 'Near route'}
-                                        </Typography>
-                                      </Box>
-                                      {stop.distanceFromOrigin && (
-                                        <Box sx={{ 
-                                          display: 'flex', 
-                                          alignItems: 'center', 
-                                          gap: 0.5,
-                                          bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.08)',
-                                          px: 1.5,
-                                          py: 0.5,
-                                          borderRadius: 0,
-                                          border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
-                                        }}>
-                                          <Typography variant="caption" sx={{ 
-                                            color: 'success.main',
-                                            fontWeight: 600,
-                                            fontSize: '0.75rem'
-                                          }}>
-                                            🕒 {stop.timeDisplayFromOrigin || `${Math.round(stop.distanceFromOrigin / 50 * 60)}m`} from start
-                                          </Typography>
-                                        </Box>
-                                      )}
-                                    </Box>
                                   </Box>
-                                }
-                              />
+                                  {stop.user_ratings_total && (
+                                    <Typography variant="body2" sx={{ 
+                                      color: theme.palette.text.secondary,
+                                      fontSize: '0.85rem'
+                                    }}>
+                                      • {stop.user_ratings_total} reviews
+                                    </Typography>
+                                  )}
+                                </Box>
+                                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                                  <Box sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: 0.5,
+                                    bgcolor: darkMode ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
+                                    px: 1.5,
+                                    py: 0.5,
+                                    borderRadius: 1,
+                                    border: `1px solid ${darkMode ? 'rgba(0,122,255,0.3)' : 'rgba(0,122,255,0.2)'}`
+                                  }}>
+                                    <Typography variant="caption" sx={{ 
+                                      color: 'primary.main', 
+                                      fontWeight: 600,
+                                      fontSize: '0.75rem'
+                                    }}>
+                                      📍 {stop.distanceFromRoute ? `${stop.distanceFromRoute.toFixed(1)}km from route` : 'Near route'}
+                                    </Typography>
+                                  </Box>
+                                  {stop.distanceFromOrigin && (
+                                    <Box sx={{ 
+                                      display: 'flex', 
+                                      alignItems: 'center', 
+                                      gap: 0.5,
+                                      bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.08)',
+                                      px: 1.5,
+                                      py: 0.5,
+                                      borderRadius: 1,
+                                      border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+                                    }}>
+                                      <Typography variant="caption" sx={{ 
+                                        color: 'success.main',
+                                        fontWeight: 600,
+                                        fontSize: '0.75rem'
+                                      }}>
+                                        🕒 {stop.timeDisplayFromOrigin || `${Math.round(stop.distanceFromOrigin / 50 * 60)}m`} from start
+                                      </Typography>
+                                    </Box>
+                                  )}
+                                </Box>
+                              </Box>
                               
                               <Button
                                 variant="contained"
@@ -2217,7 +2477,12 @@ function AuthenticatedApp() {
                     <Polyline
                       key={routeKey}
                       path={routePolyline}
-                      options={{ strokeColor: '#6750A4', strokeWeight: 5, strokeOpacity: 0.8 }}
+                      options={{ 
+                        strokeColor: '#007AFF', 
+                        strokeWeight: 8, 
+                        strokeOpacity: 0.9,
+                        zIndex: 1000
+                      }}
                     />
                   )}
                   

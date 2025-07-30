@@ -1,6 +1,19 @@
 # PitStopPal 🚗
 
-Your cheeky co-pilot for pee, petrol, and pakoras! Find the perfect stops along your route with smart search and navigation.
+
+
+A modern, secure web application for intelligent route planning and navigation with AI-powered features. Your cheeky co-pilot for finding the perfect stops along your route. Built with React, Node.js, and integrated with Google Maps and OpenAI.
+
+## ✨ Features
+
+- 🗺️ **Interactive Maps**: Full Google Maps integration with satellite/terrain views
+- 🔍 **Smart Search**: AI-powered Natural Language place search with ratings and photos
+- 🛣️ **Intelligent Routing**: Optimized route planning with real-time directions
+- 🚏 **Dynamic Stops**: Add/remove stops along your route on the fly using Natural Language
+- 📱 **Mobile Responsive**: Works seamlessly on desktop and mobile devices
+- 🌙 **Dark Mode**: Beautiful dark/light theme switching
+- 📤 **Share Routes**: Native sharing on mobile, clipboard fallback on desktop
+- ⚡ **Real-time Updates**: Live route recalculation and traffic-aware routing
 
 ## 🎯 Quick Start
 
@@ -41,7 +54,7 @@ docker-compose up
 - **AI-Powered Search**: OpenAI integration for intelligent recommendations
 - **Location-Aware Search**: Automatically uses your current location for nearby searches
 - **Responsive Design**: Works on desktop and mobile
-- **Secure Authentication**: JWT-based login system
+
 
 ## 📁 Project Structure
 

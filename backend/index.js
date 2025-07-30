@@ -198,13 +198,22 @@ app.post('/search', authenticateToken, async (req, res) => {
       url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
     } else {
       // Use Nearby Search for user's current location
-      url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=5000&type=cafe&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
+      const placeType = parsed.type ? parsed.type.toLowerCase().replace(/\s+/g, '_') : 'establishment';
+      url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=10000&type=${placeType}&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
     }
     console.log('Search URL:', url);
     const placesResp = await fetch(url);
     const placesData = await placesResp.json();
     console.log('Google Places API response:', JSON.stringify(placesData, null, 2));
-    res.json({ parsed, aiText, places: placesData.results || [], searchLocation });
+    
+    // Only apply ranking for nearby searches (when using Nearby Search API)
+    let places = placesData.results || [];
+    if (!parsed.location || parsed.location.toLowerCase() === 'nearby') {
+      // Apply ranking only for nearby searches
+      places = rankSearchResults(places, searchLocation);
+    }
+    
+    res.json({ parsed, aiText, places, searchLocation });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -680,6 +689,50 @@ function calculateDistance(lat1, lng1, lat2, lng2) {
     Math.sin(dLng/2) * Math.sin(dLng/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
   return R * c; // Distance in kilometers
+}
+
+// Helper function to rank search results based on reviews and distance
+function rankSearchResults(places, searchLocation) {
+  if (!places || places.length === 0) return [];
+  
+  // Parse search location
+  const [searchLat, searchLng] = searchLocation.split(',').map(Number);
+  
+  return places.map(place => {
+    // Calculate distance from search location
+    const distance = calculateDistance(
+      searchLat, 
+      searchLng, 
+      place.geometry.location.lat, 
+      place.geometry.location.lng
+    );
+    
+    // Calculate review score (0-100)
+    const reviewScore = place.rating ? (place.rating / 5) * 100 : 0;
+    const reviewCount = place.user_ratings_total || 0;
+    
+    // Weighted scoring system
+    // Distance weight: 40% (closer is better)
+    // Rating weight: 40% (higher rating is better)
+    // Review count weight: 20% (more reviews = more reliable)
+    
+    const distanceScore = Math.max(0, 100 - (distance * 10)); // 10km = 0 score, 0km = 100 score
+    const ratingScore = reviewScore;
+    const reviewCountScore = Math.min(100, (reviewCount / 100) * 100); // Cap at 100 reviews
+    
+    const totalScore = (distanceScore * 0.4) + (ratingScore * 0.4) + (reviewCountScore * 0.2);
+    
+    return {
+      ...place,
+      _ranking: {
+        totalScore: Math.round(totalScore * 100) / 100,
+        distanceScore: Math.round(distanceScore * 100) / 100,
+        ratingScore: Math.round(ratingScore * 100) / 100,
+        reviewCountScore: Math.round(reviewCountScore * 100) / 100,
+        distance: Math.round(distance * 100) / 100
+      }
+    };
+  }).sort((a, b) => b._ranking.totalScore - a._ranking.totalScore);
 }
 
 // Helper function to decode polyline (same as frontend)

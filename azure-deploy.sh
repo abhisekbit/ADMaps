@@ -2,6 +2,12 @@
 
 # Azure Deployment Script for PitStopPal
 # This script builds Docker images locally and deploys to Azure Web Apps
+# 
+# IMPROVEMENTS:
+# - Uses timestamped Docker image tags to force fresh deployments
+# - Forces Azure Web App restart to ensure new container is picked up
+# - Verifies deployment by checking JavaScript file references
+# - Prevents caching issues that could serve old JavaScript files
 
 set -e
 
@@ -127,12 +133,24 @@ build_backend() {
     
     cd backend
     
-    # Build image
-    docker build --platform=linux/amd64 -t $ACR_LOGIN_SERVER/pitstoppal-backend:latest .
+    # Generate timestamped tag to force fresh deployment
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    IMAGE_TAG="pitstoppal-backend:$TIMESTAMP"
     
-    # Push to ACR
-    print_status "Pushing backend image to ACR..."
+    # Build image with timestamped tag
+    print_status "Building Docker image with tag: $IMAGE_TAG"
+    docker build --platform=linux/amd64 -t $ACR_LOGIN_SERVER/$IMAGE_TAG .
+    
+    # Also tag as latest for consistency
+    docker tag $ACR_LOGIN_SERVER/$IMAGE_TAG $ACR_LOGIN_SERVER/pitstoppal-backend:latest
+    
+    # Push both tags to ACR
+    print_status "Pushing backend images to ACR..."
+    docker push $ACR_LOGIN_SERVER/$IMAGE_TAG
     docker push $ACR_LOGIN_SERVER/pitstoppal-backend:latest
+    
+    # Store the timestamped tag for deployment
+    echo "$IMAGE_TAG" > .deployment_tag
     
     cd ..
     print_success "Backend image built and pushed successfully"
@@ -142,15 +160,25 @@ build_backend() {
 deploy_backend() {
     print_status "Deploying backend to Azure Web App..."
     
+    # Get the timestamped tag from the build
+    if [ -f "backend/.deployment_tag" ]; then
+        DEPLOYMENT_TAG=$(cat backend/.deployment_tag)
+        print_status "Using deployment tag: $DEPLOYMENT_TAG"
+    else
+        print_warning "No deployment tag found, using latest"
+        DEPLOYMENT_TAG="pitstoppal-backend:latest"
+    fi
+    
     # Get ACR credentials
     ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
     ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query passwords[0].value -o tsv)
     
-    # Configure Web App for container deployment
+    # Configure Web App for container deployment with timestamped tag
+    print_status "Updating Azure Web App with new container image..."
     az webapp config container set \
         --resource-group $RESOURCE_GROUP \
         --name $BACKEND_WEBAPP_NAME \
-        --docker-custom-image-name $ACR_LOGIN_SERVER/pitstoppal-backend:latest \
+        --docker-custom-image-name $ACR_LOGIN_SERVER/$DEPLOYMENT_TAG \
         --docker-registry-server-url https://$ACR_LOGIN_SERVER \
         --docker-registry-server-user $ACR_USERNAME \
         --docker-registry-server-password $ACR_PASSWORD
@@ -163,6 +191,25 @@ deploy_backend() {
         WEBSITES_PORT=8080 \
         NODE_ENV=production \
         PORT=8080
+    
+    # Force restart to ensure new container is picked up
+    print_status "Restarting Azure Web App to apply changes..."
+    az webapp restart --resource-group $RESOURCE_GROUP --name $BACKEND_WEBAPP_NAME
+    
+    # Wait for restart to complete
+    print_status "Waiting for restart to complete..."
+    sleep 30
+    
+    # Verify the correct JavaScript file is being served
+    print_status "Verifying deployment..."
+    BACKEND_URL=$(az webapp show --resource-group $RESOURCE_GROUP --name $BACKEND_WEBAPP_NAME --query defaultHostName -o tsv)
+    JS_FILE=$(curl -s "https://$BACKEND_URL" | grep -o 'index-[^.]*\.js' | head -1)
+    
+    if [ -n "$JS_FILE" ]; then
+        print_success "Deployment verified - serving JavaScript file: $JS_FILE"
+    else
+        print_warning "Could not verify JavaScript file reference"
+    fi
     
     print_success "Backend deployed successfully"
 }
@@ -184,6 +231,15 @@ test_local() {
     
     docker stop test-backend
     docker rm test-backend
+}
+
+# Cleanup temporary files
+cleanup() {
+    print_status "Cleaning up temporary files..."
+    if [ -f "backend/.deployment_tag" ]; then
+        rm backend/.deployment_tag
+        print_success "Cleaned up deployment tag file"
+    fi
 }
 
 # Get deployment URLs
@@ -225,6 +281,7 @@ main() {
     fi
     
     deploy_backend
+    cleanup
     get_urls
     
     print_success "Deployment completed!"

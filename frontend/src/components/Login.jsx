@@ -86,8 +86,8 @@ const Login = ({ onLogin, darkMode }) => {
                   height: { xs: 80, sm: 100, md: 120 },
                   borderRadius: '16px',
                   boxShadow: darkMode 
-                    ? '0 8px 32px rgba(76, 175, 80, 0.3)' 
-                    : '0 8px 32px rgba(46, 125, 50, 0.2)',
+                    ? '0 8px 32px rgba(0, 122, 255, 0.3)' 
+                    : '0 8px 32px rgba(0, 122, 255, 0.2)',
                   filter: 'brightness(1.1)',
                   transition: 'transform 0.3s ease',
                   '&:hover': {
@@ -98,13 +98,14 @@ const Login = ({ onLogin, darkMode }) => {
             </Box>
           <Typography variant="h3" component="h1" gutterBottom sx={{
             background: darkMode 
-              ? 'linear-gradient(45deg, #4caf50, #81c784)'
-              : 'linear-gradient(45deg, #2e7d32, #4caf50)',
+              ? 'linear-gradient(45deg, #007aff, #4da6ff)'
+              : 'linear-gradient(45deg, #007aff, #0056cc)',
             backgroundClip: 'text',
             WebkitBackgroundClip: 'text',
             color: 'transparent',
             fontWeight: 'bold',
-            letterSpacing: '-0.02em'
+            letterSpacing: '2px',
+            fontFamily: 'Courier New, Monaco, Menlo, Consolas, monospace'
           }}>
             PitStopPal
           </Typography>
@@ -177,13 +178,20 @@ const Login = ({ onLogin, darkMode }) => {
                 mb: 2,
                 py: 1.5,
                 background: darkMode 
-                  ? 'linear-gradient(45deg, #4caf50, #66bb6a)'
-                  : 'linear-gradient(45deg, #2e7d32, #4caf50)',
+                  ? 'linear-gradient(45deg, #007aff, #4da6ff)'
+                  : 'linear-gradient(45deg, #007aff, #0056cc)',
+                boxShadow: '0 4px 16px rgba(0, 122, 255, 0.3)',
                 '&:hover': {
                   background: darkMode 
-                    ? 'linear-gradient(45deg, #388e3c, #4caf50)'
-                    : 'linear-gradient(45deg, #1b5e20, #2e7d32)',
-                }
+                    ? 'linear-gradient(45deg, #0056cc, #007aff)'
+                    : 'linear-gradient(45deg, #0056cc, #007aff)',
+                  boxShadow: '0 6px 20px rgba(0, 122, 255, 0.4)',
+                  transform: 'translateY(-2px)'
+                },
+                '&:active': {
+                  transform: 'translateY(0)'
+                },
+                transition: 'all 0.3s ease'
               }}
             >
               {loading ? (

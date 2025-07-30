@@ -13,6 +13,13 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* PitStopPal monospace font styling */
+.pitstoppal-brand {
+  font-family: 'Courier New', 'Monaco', 'Menlo', 'Consolas', monospace;
+  letter-spacing: 2px;
+  font-weight: bold;
+}
+
 a {
   font-weight: 500;
   color: #646cff;
