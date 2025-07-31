@@ -45,6 +45,11 @@ export default defineConfig({
         target: 'http://localhost:4001',
         changeOrigin: true,
         secure: false
+      },
+      '/autocomplete': {
+        target: 'http://localhost:4001',
+        changeOrigin: true,
+        secure: false
       }
     }
   }

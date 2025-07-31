@@ -31,7 +31,9 @@ import {
   MyLocation as MyLocationIcon,
   ExpandMore as ExpandMoreIcon,
   Share as ShareIcon,
-  ContentCopy as ContentCopyIcon
+  ContentCopy as ContentCopyIcon,
+  LocationOn as LocationOnIcon,
+  Mood as MoodIcon
 } from '@mui/icons-material';
 import { GoogleMap, useJsApiLoader, Marker, Polyline, TrafficLayer } from '@react-google-maps/api';
 import { Autocomplete } from '@react-google-maps/api';
@@ -233,6 +235,20 @@ function AuthenticatedApp() {
   const [shareSnackbarOpen, setShareSnackbarOpen] = React.useState(false);
   const [shareSnackbarMessage, setShareSnackbarMessage] = React.useState("");
   const [shareSnackbarSeverity, setShareSnackbarSeverity] = React.useState("success");
+  const [autocompleteSuggestions, setAutocompleteSuggestions] = React.useState([]);
+  const [showAutocomplete, setShowAutocomplete] = React.useState(false);
+  const [autocompleteLoading, setAutocompleteLoading] = React.useState(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = React.useState(-1);
+  const [hoveredPlace, setHoveredPlace] = React.useState(null);
+  
+  // Starting Point Autocomplete state
+  const [startingPointAutocompleteSuggestions, setStartingPointAutocompleteSuggestions] = React.useState([]);
+  const [showStartingPointAutocomplete, setShowStartingPointAutocomplete] = React.useState(false);
+  const [startingPointAutocompleteLoading, setStartingPointAutocompleteLoading] = React.useState(false);
+  const [selectedStartingPointSuggestionIndex, setSelectedStartingPointSuggestionIndex] = React.useState(-1);
+  
+  // Intelligent search feedback
+  const [intelligentSearchUsed, setIntelligentSearchUsed] = React.useState(false);
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: MAPS_API_KEY,
     libraries: ['places'],
@@ -293,6 +309,7 @@ function AuthenticatedApp() {
     setLoading(true);
     setError("");
     setPlaces([]);
+    setIntelligentSearchUsed(false);
     
     // Reset map state when new search is performed
     setRoutePolyline(null);
@@ -331,6 +348,7 @@ function AuthenticatedApp() {
       const data = await handledResp.json();
       if (data.error) throw new Error(data.error);
       setPlaces(data.places || []);
+      setIntelligentSearchUsed(data.intelligentSearchUsed || false);
       
       // Show all search results on the map
       if (data.places && data.places.length > 0) {
@@ -370,6 +388,204 @@ function AuthenticatedApp() {
       setLoading(false);
     }
   };
+
+  // Handle autocomplete for search input
+  const handleAutocomplete = async (input) => {
+    if (!input || input.trim().length < 2) {
+      setAutocompleteSuggestions([]);
+      setShowAutocomplete(false);
+      return;
+    }
+
+    setAutocompleteLoading(true);
+    try {
+      const resp = await fetch('/autocomplete', {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
+        body: JSON.stringify({ 
+          input: input.trim(),
+          userLocation: currentLocation
+        })
+      });
+      
+      const handledResp = await handleApiResponse(resp);
+      if (!handledResp) return; // Authentication failed, user logged out
+      
+      const data = await handledResp.json();
+      if (data.error) throw new Error(data.error);
+      
+      setAutocompleteSuggestions(data.predictions || []);
+      setShowAutocomplete(data.predictions && data.predictions.length > 0);
+      setSelectedSuggestionIndex(-1); // Reset selection when new suggestions arrive
+    } catch (err) {
+      console.error('Autocomplete error:', err);
+      setAutocompleteSuggestions([]);
+      setShowAutocomplete(false);
+    } finally {
+      setAutocompleteLoading(false);
+    }
+  };
+
+  // Handle autocomplete suggestion selection
+  const handleSuggestionSelect = (suggestion) => {
+    setSearch(suggestion.description);
+    setAutocompleteSuggestions([]);
+    setShowAutocomplete(false);
+    setSelectedSuggestionIndex(-1);
+  };
+
+  // Handle keyboard navigation
+  const handleKeyDown = (e) => {
+    if (!showAutocomplete || autocompleteSuggestions.length === 0) return;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => 
+          prev < autocompleteSuggestions.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (selectedSuggestionIndex >= 0 && selectedSuggestionIndex < autocompleteSuggestions.length) {
+          handleSuggestionSelect(autocompleteSuggestions[selectedSuggestionIndex]);
+        } else {
+          // Close autocomplete and submit the form if no suggestion is selected
+          setShowAutocomplete(false);
+          setSelectedSuggestionIndex(-1);
+          handleSearch(e);
+        }
+        break;
+      case 'Escape':
+        setShowAutocomplete(false);
+        setSelectedSuggestionIndex(-1);
+        break;
+    }
+  };
+
+  // Handle click outside to close autocomplete
+  const handleClickOutside = (event) => {
+    if (showAutocomplete && !event.target.closest('.autocomplete-container')) {
+      setShowAutocomplete(false);
+      setAutocompleteSuggestions([]);
+    }
+    if (showStartingPointAutocomplete && !event.target.closest('.starting-point-autocomplete-container')) {
+      setShowStartingPointAutocomplete(false);
+      setStartingPointAutocompleteSuggestions([]);
+    }
+  };
+
+  // Starting Point Autocomplete Functions
+  const handleStartingPointAutocomplete = async (input) => {
+    if (!input || input.trim().length < 2) {
+      setStartingPointAutocompleteSuggestions([]);
+      setShowStartingPointAutocomplete(false);
+      return;
+    }
+
+    setStartingPointAutocompleteLoading(true);
+    try {
+      const resp = await fetch('/autocomplete', {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
+        body: JSON.stringify({ 
+          input: input.trim(),
+          userLocation: currentLocation
+        })
+      });
+      
+      const handledResp = await handleApiResponse(resp);
+      if (!handledResp) return; // Authentication failed, user logged out
+      
+      const data = await handledResp.json();
+      if (data.error) throw new Error(data.error);
+      
+      setStartingPointAutocompleteSuggestions(data.predictions || []);
+      setShowStartingPointAutocomplete(data.predictions && data.predictions.length > 0);
+      setSelectedStartingPointSuggestionIndex(-1); // Reset selection when new suggestions arrive
+    } catch (err) {
+      console.error('Starting Point Autocomplete error:', err);
+      setStartingPointAutocompleteSuggestions([]);
+      setShowStartingPointAutocomplete(false);
+    } finally {
+      setStartingPointAutocompleteLoading(false);
+    }
+  };
+
+  // Handle starting point autocomplete suggestion selection
+  const handleStartingPointSuggestionSelect = (suggestion) => {
+    setStartingPoint(suggestion.description);
+    setStartingPointAutocompleteSuggestions([]);
+    setShowStartingPointAutocomplete(false);
+    setSelectedStartingPointSuggestionIndex(-1);
+    
+    // Also set the location for navigation
+    // We'll need to geocode this or use place details API to get coordinates
+    fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(suggestion.description)}&key=${MAPS_API_KEY}`)
+      .then(response => response.json())
+      .then(data => {
+        if (data.results && data.results[0]) {
+          const location = data.results[0].geometry.location;
+          setStartingPointLocation({
+            lat: location.lat,
+            lng: location.lng
+          });
+        }
+      })
+      .catch(error => {
+        console.error('Geocoding error:', error);
+      });
+  };
+
+  // Handle starting point keyboard navigation
+  const handleStartingPointKeyDown = (e) => {
+    if (!showStartingPointAutocomplete || startingPointAutocompleteSuggestions.length === 0) return;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedStartingPointSuggestionIndex(prev => 
+          prev < startingPointAutocompleteSuggestions.length - 1 ? prev + 1 : prev
+        );
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedStartingPointSuggestionIndex(prev => prev > 0 ? prev - 1 : -1);
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (selectedStartingPointSuggestionIndex >= 0 && selectedStartingPointSuggestionIndex < startingPointAutocompleteSuggestions.length) {
+          handleStartingPointSuggestionSelect(startingPointAutocompleteSuggestions[selectedStartingPointSuggestionIndex]);
+        } else {
+          // Close autocomplete if no suggestion is selected
+          setShowStartingPointAutocomplete(false);
+          setSelectedStartingPointSuggestionIndex(-1);
+        }
+        break;
+      case 'Escape':
+        setShowStartingPointAutocomplete(false);
+        setSelectedStartingPointSuggestionIndex(-1);
+        break;
+    }
+  };
+
+  // Add click outside listener
+  React.useEffect(() => {
+    document.addEventListener('click', handleClickOutside);
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [showAutocomplete, showStartingPointAutocomplete]);
 
   // Helper to decode Google polyline
   function decodePolyline(encoded) {
@@ -599,6 +815,15 @@ function AuthenticatedApp() {
     
     // Recalculate route without the removed stop
     if (selectedPlace && navigationOrigin) {
+      // Validate navigationOrigin coordinates
+      if (typeof navigationOrigin === 'object' && 
+          (navigationOrigin.lat === undefined || navigationOrigin.lng === undefined || 
+           typeof navigationOrigin.lat !== 'number' || typeof navigationOrigin.lng !== 'number')) {
+        setError("Invalid starting location. Please restart navigation.");
+        setRecalculatingRoute(false);
+        return;
+      }
+      
       try {
         const resp = await fetch('/recalculate-route', {
           method: "POST",
@@ -639,13 +864,44 @@ function AuthenticatedApp() {
         // Auto-zoom to fit the entire updated route
         if (mapRef.current && newPolyline.length > 0) {
           const bounds = new window.google.maps.LatLngBounds();
-          bounds.extend(navigationOrigin);
-          bounds.extend(selectedPlace.geometry.location);
-          newPolyline.forEach(point => bounds.extend(point));
-          // Add remaining stops to bounds
-          updatedStops.forEach(stopItem => {
-            bounds.extend(stopItem.geometry.location);
+          
+          // Ensure navigationOrigin is in proper LatLng format
+          if (navigationOrigin) {
+            const originLatLng = typeof navigationOrigin === 'object' && navigationOrigin.lat !== undefined 
+              ? { lat: parseFloat(navigationOrigin.lat), lng: parseFloat(navigationOrigin.lng) }
+              : navigationOrigin;
+            bounds.extend(originLatLng);
+          }
+          
+          // Ensure selectedPlace coordinates are in proper LatLng format
+          if (selectedPlace?.geometry?.location) {
+            const destLatLng = {
+              lat: parseFloat(selectedPlace.geometry.location.lat),
+              lng: parseFloat(selectedPlace.geometry.location.lng)
+            };
+            bounds.extend(destLatLng);
+          }
+          
+          // Add route points
+          newPolyline.forEach(point => {
+            const routeLatLng = {
+              lat: parseFloat(point.lat),
+              lng: parseFloat(point.lng)
+            };
+            bounds.extend(routeLatLng);
           });
+          
+          // Add remaining stops to bounds with proper formatting
+          updatedStops.forEach(stopItem => {
+            if (stopItem?.geometry?.location) {
+              const stopLatLng = {
+                lat: parseFloat(stopItem.geometry.location.lat),
+                lng: parseFloat(stopItem.geometry.location.lng)
+              };
+              bounds.extend(stopLatLng);
+            }
+          });
+          
           mapRef.current.fitBounds(bounds);
         }
       } catch (err) {
@@ -746,7 +1002,23 @@ function AuthenticatedApp() {
   };
 
   const handleAddStopToRoute = async (stop) => {
-    if (!selectedPlace || !navigationOrigin) return;
+    if (!selectedPlace) {
+      setError("Please select a destination first");
+      return;
+    }
+    
+    if (!navigationOrigin) {
+      setError("Please start navigation first before adding stops");
+      return;
+    }
+    
+    // Validate navigationOrigin coordinates
+    if (typeof navigationOrigin === 'object' && 
+        (navigationOrigin.lat === undefined || navigationOrigin.lng === undefined || 
+         typeof navigationOrigin.lat !== 'number' || typeof navigationOrigin.lng !== 'number')) {
+      setError("Invalid starting location. Please restart navigation.");
+      return;
+    }
     
     setAddingStopToRoute(true);
     setRecalculatingRoute(true);
@@ -816,13 +1088,44 @@ function AuthenticatedApp() {
       // Auto-zoom to fit the entire updated route
       if (mapRef.current && newPolyline.length > 0) {
         const bounds = new window.google.maps.LatLngBounds();
-        bounds.extend(navigationOrigin);
-        bounds.extend(selectedPlace.geometry.location);
-        newPolyline.forEach(point => bounds.extend(point));
-        // Add all added stops to bounds
-        [...addedStops, stop].forEach(stopItem => {
-          bounds.extend(stopItem.geometry.location);
+        
+        // Ensure navigationOrigin is in proper LatLng format
+        if (navigationOrigin) {
+          const originLatLng = typeof navigationOrigin === 'object' && navigationOrigin.lat !== undefined 
+            ? { lat: parseFloat(navigationOrigin.lat), lng: parseFloat(navigationOrigin.lng) }
+            : navigationOrigin;
+          bounds.extend(originLatLng);
+        }
+        
+        // Ensure selectedPlace coordinates are in proper LatLng format
+        if (selectedPlace?.geometry?.location) {
+          const destLatLng = {
+            lat: parseFloat(selectedPlace.geometry.location.lat),
+            lng: parseFloat(selectedPlace.geometry.location.lng)
+          };
+          bounds.extend(destLatLng);
+        }
+        
+        // Add route points
+        newPolyline.forEach(point => {
+          const routeLatLng = {
+            lat: parseFloat(point.lat),
+            lng: parseFloat(point.lng)
+          };
+          bounds.extend(routeLatLng);
         });
+        
+        // Add all added stops to bounds with proper formatting
+        [...addedStops, stop].forEach(stopItem => {
+          if (stopItem?.geometry?.location) {
+            const stopLatLng = {
+              lat: parseFloat(stopItem.geometry.location.lat),
+              lng: parseFloat(stopItem.geometry.location.lng)
+            };
+            bounds.extend(stopLatLng);
+          }
+        });
+        
         mapRef.current.fitBounds(bounds);
       }
       
@@ -1414,22 +1717,118 @@ function AuthenticatedApp() {
                 Search Places
               </Typography>
               <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <TextField
-                  fullWidth
-                  variant="outlined"
-                  label="Search for Places in natural language"
-                  placeholder="e.g., Find a Coffee shop in Singapore near the Marina Bay Sands"
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  sx={textFieldSx}
-                  InputProps={{
-                    startAdornment: (
-                      <InputAdornment position="start">
-                        <SearchIcon color="primary" />
-                      </InputAdornment>
-                    ),
-                  }}
-                />
+                <Box sx={{ position: 'relative' }} className="autocomplete-container">
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="Search for Places in natural language"
+                    placeholder="e.g., Find a Coffee shop in Singapore near the Marina Bay Sands"
+                    value={search}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSearch(value);
+                      // Clear previous timeout and set new one for debouncing
+                      if (window.autocompleteTimeout) {
+                        clearTimeout(window.autocompleteTimeout);
+                      }
+                      window.autocompleteTimeout = setTimeout(() => {
+                        handleAutocomplete(value);
+                      }, 300);
+                    }}
+                    onFocus={() => {
+                      if (search.trim().length >= 2) {
+                        handleAutocomplete(search);
+                      }
+                    }}
+                    onKeyDown={handleKeyDown}
+                    sx={textFieldSx}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon color="primary" />
+                        </InputAdornment>
+                      ),
+                      endAdornment: autocompleteLoading && (
+                        <InputAdornment position="end">
+                          <CircularProgress size={20} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  
+                  {/* Autocomplete Suggestions */}
+                  {showAutocomplete && (
+                    <Paper
+                      elevation={8}
+                      sx={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        zIndex: 1000,
+                        mt: 0.5,
+                        maxHeight: 300,
+                        overflowY: 'auto',
+                        borderRadius: 2,
+                        boxShadow: darkMode 
+                          ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                          : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
+                        bgcolor: theme.palette.background.paper
+                      }}
+                    >
+                      {autocompleteSuggestions.length > 0 ? (
+                        <List sx={{ p: 0 }}>
+                          {autocompleteSuggestions.map((suggestion, index) => (
+                            <ListItem
+                              key={suggestion.place_id || index}
+                              button
+                              onClick={() => handleSuggestionSelect(suggestion)}
+                              sx={{
+                                py: 1.5,
+                                px: 2,
+                                borderBottom: index < autocompleteSuggestions.length - 1 
+                                  ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` 
+                                  : 'none',
+                                bgcolor: index === selectedSuggestionIndex 
+                                  ? darkMode ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.1)'
+                                  : 'transparent',
+                                '&:hover': {
+                                  bgcolor: darkMode ? 'rgba(0,122,255,0.1)' : 'rgba(0,122,255,0.05)',
+                                  transition: 'all 0.2s ease'
+                                },
+                                '&:last-child': {
+                                  borderBottom: 'none'
+                                }
+                              }}
+                            >
+                              <ListItemText
+                                primary={suggestion.structured_formatting?.main_text || suggestion.description}
+                                secondary={suggestion.structured_formatting?.secondary_text || ''}
+                                primaryTypographyProps={{
+                                  fontSize: '0.95rem',
+                                  fontWeight: 500,
+                                  color: theme.palette.text.primary
+                                }}
+                                secondaryTypographyProps={{
+                                  fontSize: '0.8rem',
+                                  color: theme.palette.text.secondary
+                                }}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      ) : (
+                        <Box sx={{ p: 2, textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">
+                            No suggestions found
+                          </Typography>
+                        </Box>
+                      )}
+                    </Paper>
+                  )}
+                </Box>
+                
                 <Button 
                   type="submit" 
                   variant="contained" 
@@ -1441,6 +1840,28 @@ function AuthenticatedApp() {
                 </Button>
               </form>
             </Box>
+
+            {/* Intelligent Search Notification */}
+            {intelligentSearchUsed && places.length > 0 && (
+              <Paper elevation={3} sx={{ 
+                p: 2, 
+                mb: 2, 
+                borderRadius: 2, 
+                bgcolor: darkMode ? 'rgba(76,175,80,0.1)' : 'rgba(76,175,80,0.05)',
+                border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+              }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <SearchIcon sx={{ color: 'success.main', fontSize: '1.2rem' }} />
+                  <Typography variant="body2" sx={{ 
+                    color: 'success.main', 
+                    fontWeight: 600,
+                    fontSize: '0.9rem'
+                  }}>
+                    🤖 AI Enhanced Search: We interpreted your query and found these relevant results
+                  </Typography>
+                </Box>
+              </Paper>
+            )}
 
             {/* Search Results */}
             {places.length > 0 && (
@@ -1471,112 +1892,148 @@ function AuthenticatedApp() {
                   <List sx={{ p: 0 }}>
                     {places.slice(0, 10).map((place, idx) => (
                       <React.Fragment key={place.place_id || idx}>
-                        <ListItem sx={{ 
-                          alignItems: 'flex-start',
-                          p: 3,
-                          borderBottom: idx < places.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
-                          '&:hover': {
-                            bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-                            transition: 'all 0.3s ease',
-                            transform: 'translateY(-1px)',
-                            boxShadow: darkMode 
-                              ? '0 4px 12px rgba(0,0,0,0.3)' 
-                              : '0 4px 12px rgba(0,0,0,0.1)'
-                          }
-                        }}>
-                          <Avatar sx={{ 
-                            mr: 3, 
-                            width: 64, 
-                            height: 64,
-                            borderRadius: 2,
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                            border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                        <ListItem 
+                          onMouseEnter={() => setHoveredPlace({ title: place.name, placeId: place.place_id })}
+                          onMouseLeave={() => setHoveredPlace(null)}
+                          sx={{ 
+                            flexDirection: 'column',
+                            alignItems: 'stretch',
+                            p: { xs: 2, sm: 3 },
+                            borderBottom: idx < places.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
+                            '&:hover': {
+                              bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                              transition: 'all 0.3s ease',
+                              transform: 'translateY(-1px)',
+                              boxShadow: darkMode 
+                                ? '0 4px 12px rgba(0,0,0,0.3)' 
+                                : '0 4px 12px rgba(0,0,0,0.1)'
+                            }
                           }}>
-                            {place.photos && place.photos[0] ? (
-                              <img 
-                                src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${place.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
-                                alt={place.name}
-                                style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
-                              />
-                            ) : (
-                              <SearchIcon sx={{ fontSize: '1.5rem' }} />
-                            )}
-                          </Avatar>
-                          <Box sx={{ flex: 1, minWidth: 0 }}>
-                            <Typography variant="h6" sx={{ 
-                              fontWeight: 700, 
-                              mb: 1,
-                              color: theme.palette.text.primary,
-                              fontSize: '1.1rem',
-                              lineHeight: 1.3
-                            }}>
-                              {place.name}
-                            </Typography>
-                            <Typography variant="body2" sx={{ 
-                              color: theme.palette.text.secondary, 
-                              mb: 1.5, 
-                              display: 'block',
-                              fontSize: '0.9rem',
-                              lineHeight: 1.4
-                            }}>
-                              {place.formatted_address}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <Rating 
-                                  value={place.rating || 0} 
-                                  precision={0.1} 
-                                  readOnly 
-                                  size="small"
-                                  sx={{ 
-                                    '& .MuiRating-iconFilled': {
-                                      color: '#FFD700'
-                                    }
-                                  }}
-                                />
+                          <Box sx={{ width: '100%' }}>
+                            {/* Top Row: Image and Basic Info */}
+                            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                              <Box sx={{ 
+                                mr: { xs: 2, sm: 3 }, 
+                                width: { xs: 56, sm: 64 }, 
+                                height: { xs: 56, sm: 64 },
+                                borderRadius: 2,
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                                flexShrink: 0,
+                                overflow: 'hidden'
+                              }}>
+                                {place.photos && place.photos[0] ? (
+                                  <img 
+                                    src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${place.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
+                                    alt={place.name}
+                                    style={{ 
+                                      width: '100%', 
+                                      height: '100%', 
+                                      objectFit: 'cover',
+                                      borderRadius: '6px'
+                                    }}
+                                  />
+                                ) : (
+                                  <Box sx={{ 
+                                    width: '100%', 
+                                    height: '100%', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                                    borderRadius: '6px'
+                                  }}>
+                                    <SearchIcon sx={{ fontSize: '1.5rem', color: 'text.secondary' }} />
+                                  </Box>
+                                )}
+                              </Box>
+                              
+                              <Box sx={{ flex: 1, minWidth: 0 }}>
+                                <Typography variant="h6" sx={{ 
+                                  fontWeight: 700, 
+                                  mb: 1,
+                                  color: theme.palette.text.primary,
+                                  fontSize: { xs: '1rem', sm: '1.1rem' },
+                                  lineHeight: 1.3
+                                }}>
+                                  {place.name}
+                                </Typography>
+                                
+                                <Box sx={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  gap: 2, 
+                                  flexWrap: 'wrap'
+                                }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    <Rating 
+                                      value={place.rating || 0} 
+                                      precision={0.1} 
+                                      readOnly 
+                                      size="small"
+                                      sx={{ 
+                                        '& .MuiRating-iconFilled': {
+                                          color: '#FFD700'
+                                        }
+                                      }}
+                                    />
+                                    <Typography variant="body2" sx={{ 
+                                      color: theme.palette.text.secondary,
+                                      fontWeight: 500,
+                                      fontSize: '0.85rem'
+                                    }}>
+                                      {place.rating ? `${place.rating.toFixed(1)}` : 'No rating'}
+                                    </Typography>
+                                  </Box>
+                                  {place.user_ratings_total && (
+                                    <Typography variant="body2" sx={{ 
+                                      color: theme.palette.text.secondary,
+                                      fontSize: '0.85rem'
+                                    }}>
+                                      • {place.user_ratings_total} reviews
+                                    </Typography>
+                                  )}
+                                </Box>
+                              </Box>
+                            </Box>
+                            
+                            {/* Summary Section - Full Width */}
+                            {place.overviewReview && (
+                              <Box sx={{ mb: 1.5 }}>
+                                <Typography variant="caption" sx={{ 
+                                  fontWeight: 700,
+                                  color: 'primary.main',
+                                  fontSize: '0.75rem',
+                                  letterSpacing: 0.5,
+                                  textTransform: 'uppercase',
+                                  mb: 1,
+                                  display: 'block'
+                                }}>
+                                  AI Review Summary
+                                </Typography>
                                 <Typography variant="body2" sx={{ 
                                   color: theme.palette.text.secondary,
-                                  fontWeight: 500,
-                                  fontSize: '0.85rem'
+                                  fontSize: '0.9rem',
+                                  lineHeight: 1.4,
+                                  fontStyle: 'italic',
+                                  bgcolor: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                                  p: 1.5,
+                                  borderRadius: 1,
+                                  border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`
                                 }}>
-                                  {place.rating ? `${place.rating.toFixed(1)}` : 'No rating'}
+                                  "{place.overviewReview}"
                                 </Typography>
                               </Box>
-                              {place.user_ratings_total && (
-                                <Typography variant="body2" sx={{ 
-                                  color: theme.palette.text.secondary,
-                                  fontSize: '0.85rem'
-                                }}>
-                                  • {place.user_ratings_total} reviews
-                                </Typography>
-                              )}
-                            </Box>
-                            {/* Ranking info for nearby searches */}
+                            )}
+                            
+                            {/* Distance, Sentiment, and Navigate Section - Full Width */}
                             {place._ranking && (
                               <Box sx={{ 
                                 display: 'flex', 
                                 gap: 1, 
                                 flexWrap: 'wrap',
-                                mb: 1.5
+                                alignItems: 'center'
                               }}>
-                                <Box sx={{ 
-                                  display: 'flex', 
-                                  alignItems: 'center', 
-                                  gap: 0.5,
-                                  bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.1)',
-                                  px: 1.5,
-                                  py: 0.5,
-                                  borderRadius: 1,
-                                  border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
-                                }}>
-                                  <Typography variant="caption" sx={{ 
-                                    color: 'success.main',
-                                    fontWeight: 600,
-                                    fontSize: '0.75rem'
-                                  }}>
-                                    🏆 Score: {place._ranking.totalScore}
-                                  </Typography>
-                                </Box>
                                 <Box sx={{ 
                                   display: 'flex', 
                                   alignItems: 'center', 
@@ -1587,45 +2044,66 @@ function AuthenticatedApp() {
                                   borderRadius: 1,
                                   border: `1px solid ${darkMode ? 'rgba(33,150,243,0.3)' : 'rgba(33,150,243,0.2)'}`
                                 }}>
+                                  <LocationOnIcon sx={{ fontSize: '1rem', color: 'primary.main' }} />
                                   <Typography variant="caption" sx={{ 
                                     color: 'primary.main',
                                     fontWeight: 600,
                                     fontSize: '0.75rem'
                                   }}>
-                                    📍 {place._ranking.distance}km away
+                                    {place._ranking.distance}km away
                                   </Typography>
                                 </Box>
+                                {place._ranking.sentimentScore && (
+                                  <Box sx={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: 0.5,
+                                    bgcolor: darkMode ? 'rgba(255,193,7,0.15)' : 'rgba(255,193,7,0.1)',
+                                    px: 1.5,
+                                    py: 0.5,
+                                    borderRadius: 1,
+                                    border: `1px solid ${darkMode ? 'rgba(255,193,7,0.3)' : 'rgba(255,193,7,0.2)'}`
+                                  }}>
+                                    <MoodIcon sx={{ fontSize: '1rem', color: 'warning.main' }} />
+                                    <Typography variant="caption" sx={{ 
+                                      color: 'warning.main',
+                                      fontWeight: 600,
+                                      fontSize: '0.75rem'
+                                    }}>
+                                      Sentiment: {place._ranking.sentimentScore}
+                                    </Typography>
+                                  </Box>
+                                )}
+                                <Button
+                                  variant="contained"
+                                  size="small"
+                                  onClick={() => handleNavigateClick(place)}
+                                  startIcon={<DirectionsIcon />}
+                                  sx={{
+                                    minWidth: 'auto',
+                                    px: 2,
+                                    py: 0.5,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    borderRadius: 1,
+                                    bgcolor: '#007AFF',
+                                    boxShadow: '0 2px 8px rgba(0, 122, 255, 0.3)',
+                                    '&:hover': {
+                                      bgcolor: '#0056CC',
+                                      boxShadow: '0 4px 12px rgba(0, 122, 255, 0.4)',
+                                      transform: 'translateY(-1px)'
+                                    },
+                                    '&:active': {
+                                      transform: 'translateY(0)'
+                                    },
+                                    transition: 'all 0.3s ease'
+                                  }}
+                                >
+                                  Navigate
+                                </Button>
                               </Box>
                             )}
                           </Box>
-                          <Button
-                            variant="contained"
-                            size="medium"
-                            onClick={() => handleNavigateClick(place)}
-                            startIcon={<DirectionsIcon />}
-                            sx={{
-                              ml: 2,
-                              minWidth: 'auto',
-                              px: 3,
-                              py: 1,
-                              fontSize: '0.875rem',
-                              fontWeight: 600,
-                              borderRadius: 2,
-                              bgcolor: '#007AFF',
-                              boxShadow: '0 4px 16px rgba(0, 122, 255, 0.3)',
-                              '&:hover': {
-                                bgcolor: '#0056CC',
-                                boxShadow: '0 6px 20px rgba(0, 122, 255, 0.4)',
-                                transform: 'translateY(-2px)'
-                              },
-                              '&:active': {
-                                transform: 'translateY(0)'
-                              },
-                              transition: 'all 0.3s ease'
-                            }}
-                          >
-                            Navigate
-                          </Button>
                         </ListItem>
                         {idx < places.length - 1 && (
                           <Divider sx={{ mx: 2, borderColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
@@ -1652,40 +2130,113 @@ function AuthenticatedApp() {
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: theme.palette.text.primary }}>
                   Navigate to {selectedPlace.name}
                 </Typography>
-                {isLoaded && (
-                  <Autocomplete
-                    onLoad={autocomplete => setAutocomplete(autocomplete)}
-                    onPlaceChanged={() => {
-                      if (autocomplete) {
-                        const place = autocomplete.getPlace();
-                        if (place.geometry) {
-                          setStartingPointLocation({
-                            lat: place.geometry.location.lat(),
-                            lng: place.geometry.location.lng()
-                          });
-                          setStartingPoint(place.formatted_address);
-                        }
+                <Box className="starting-point-autocomplete-container" sx={{ position: 'relative', mb: 2 }}>
+                  <TextField
+                    fullWidth
+                    variant="outlined"
+                    label="Starting point (optional)"
+                    placeholder="Search for a location or leave blank to use current location"
+                    value={startingPoint}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setStartingPoint(value);
+                      // Clear previous timeout and set new one for debouncing
+                      if (window.startingPointAutocompleteTimeout) {
+                        clearTimeout(window.startingPointAutocompleteTimeout);
+                      }
+                      window.startingPointAutocompleteTimeout = setTimeout(() => {
+                        handleStartingPointAutocomplete(value);
+                      }, 300);
+                    }}
+                    onFocus={() => {
+                      if (startingPoint.trim().length >= 2) {
+                        handleStartingPointAutocomplete(startingPoint);
                       }
                     }}
-                  >
-                    <TextField
-                      fullWidth
-                      variant="outlined"
-                      label="Starting point (optional)"
-                      placeholder="Search for a location or leave blank to use current location"
-                      value={startingPoint}
-                      onChange={e => setStartingPoint(e.target.value)}
-                      sx={{ ...textFieldSx, mb: 2 }}
-                      InputProps={{
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <SearchIcon color="primary" />
-                          </InputAdornment>
-                        ),
-                      }}
-                    />
-                  </Autocomplete>
-                )}
+                    onKeyDown={handleStartingPointKeyDown}
+                    sx={{ ...textFieldSx }}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchIcon color="primary" />
+                        </InputAdornment>
+                      ),
+                      endAdornment: startingPointAutocompleteLoading && (
+                        <InputAdornment position="end">
+                          <CircularProgress size={20} />
+                        </InputAdornment>
+                      ),
+                    }}
+                  />
+                  
+                  {/* Starting Point Autocomplete Suggestions */}
+                  {showStartingPointAutocomplete && (
+                    <Paper elevation={8} sx={{ 
+                      position: 'absolute', 
+                      top: '100%', 
+                      left: 0, 
+                      right: 0, 
+                      zIndex: 1000,
+                      maxHeight: 200,
+                      overflowY: 'auto',
+                      bgcolor: theme.palette.background.paper,
+                      boxShadow: darkMode 
+                        ? '0 8px 32px rgba(0,0,0,0.6)' 
+                        : '0 8px 32px rgba(0,0,0,0.15)',
+                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                    }}>
+                      {startingPointAutocompleteSuggestions.length > 0 ? (
+                        <List sx={{ p: 0 }}>
+                          {startingPointAutocompleteSuggestions.map((suggestion, index) => (
+                            <ListItem
+                              key={suggestion.place_id}
+                              button
+                              onClick={() => handleStartingPointSuggestionSelect(suggestion)}
+                              sx={{
+                                px: 2,
+                                py: 1.5,
+                                borderBottom: index < startingPointAutocompleteSuggestions.length - 1 
+                                  ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` 
+                                  : 'none',
+                                bgcolor: index === selectedStartingPointSuggestionIndex 
+                                  ? (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)') 
+                                  : 'transparent',
+                                '&:hover': {
+                                  bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)'
+                                }
+                              }}
+                            >
+                              <SearchIcon sx={{ mr: 2, color: 'text.secondary', fontSize: '1.2rem' }} />
+                              <ListItemText 
+                                primary={suggestion.structured_formatting?.main_text || suggestion.description}
+                                secondary={suggestion.structured_formatting?.secondary_text}
+                                primaryTypographyProps={{
+                                  sx: { 
+                                    fontWeight: 600, 
+                                    color: theme.palette.text.primary,
+                                    fontSize: '0.9rem'
+                                  }
+                                }}
+                                secondaryTypographyProps={{
+                                  sx: { 
+                                    color: theme.palette.text.secondary,
+                                    fontSize: '0.8rem'
+                                  }
+                                }}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      ) : (
+                        <Box sx={{ p: 2, textAlign: 'center' }}>
+                          <Typography variant="body2" color="text.secondary">
+                            No suggestions found
+                          </Typography>
+                        </Box>
+                      )}
+                    </Paper>
+                  )}
+                </Box>
                 
                 {/* HTTPS Notice for current location */}
                 {!window.isSecureContext && (
@@ -1963,7 +2514,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> Near "{location}" along your route
+                                <strong>Location:</strong> Near "{location}" along your route
                               </Typography>
                               <Typography variant="body2" sx={{ fontSize: '0.8rem', color: theme.palette.text.secondary }}>
                                 💡 Using location-based search: Found "{location}" along your route and searching for {stopQuery.split('near')[0].trim()} nearby
@@ -1974,7 +2525,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> Near "{location}" at {distance}km along your route
+                                <strong>Location:</strong> Near "{location}" at {distance}km along your route
                               </Typography>
                               <Typography variant="body2" sx={{ fontSize: '0.8rem', color: theme.palette.text.secondary }}>
                                 💡 Using combined search: Located "{location}" along your route considering {distance}km distance constraint
@@ -1985,7 +2536,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> Near "{location}" at {timing} hour{timing !== 1 ? 's' : ''} along your route
+                                <strong>Location:</strong> Near "{location}" at {timing} hour{timing !== 1 ? 's' : ''} along your route
                                 {estimatedDistanceKm && (
                                   <span> (~{estimatedDistanceKm}km from start)</span>
                                 )}
@@ -1999,7 +2550,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> {distance}km along your route
+                                <strong>Location:</strong> {distance}km along your route
                               </Typography>
                               <Typography variant="body2" sx={{ fontSize: '0.8rem', color: theme.palette.text.secondary }}>
                                 💡 Using distance-based search: Finding places near the {distance}km point along your route using precise distance calculation
@@ -2010,7 +2561,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> {timing} hour{timing !== 1 ? 's' : ''} along your route
+                                <strong>Location:</strong> {timing} hour{timing !== 1 ? 's' : ''} along your route
                                 {estimatedDistanceKm && (
                                   <span> (~{estimatedDistanceKm}km from start)</span>
                                 )}
@@ -2024,7 +2575,7 @@ function AuthenticatedApp() {
                           return (
                             <>
                               <Typography variant="body2" sx={{ mb: 0.5, fontSize: '0.85rem' }}>
-                                <strong>📍 Location:</strong> Mid-point along your route
+                                <strong>Location:</strong> Mid-point along your route
                               </Typography>
                               <Typography variant="body2" sx={{ fontSize: '0.8rem', color: theme.palette.text.secondary }}>
                                 💡 Using route-based search: Finding places near the middle of your planned route
@@ -2043,184 +2594,250 @@ function AuthenticatedApp() {
                   
                   {/* Suggested Stops */}
                   {suggestedStops.length > 0 && (
-                    <Paper elevation={6} sx={{ 
-                      borderRadius: 2, 
-                      bgcolor: theme.palette.background.paper, 
-                      maxHeight: 400, 
-                      overflowY: 'auto',
-                      boxShadow: darkMode 
-                        ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
-                        : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
-                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`,
-                      overflow: 'hidden'
-                    }}>
-                      <Box sx={{ p: 2, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, bgcolor: darkMode ? 'rgba(0,122,255,0.1)' : 'rgba(0,122,255,0.05)' }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700, color: 'primary.main' }}>
-                          🎯 Suggested Stops
-                        </Typography>
-                      </Box>
-                      <List sx={{ p: 0 }}>
-                        {suggestedStops.map((stop, idx) => (
-                          <Box key={stop.place_id || idx}>
-                            <ListItem sx={{ 
-                              alignItems: 'flex-start',
-                              p: 3,
-                              borderBottom: idx < suggestedStops.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
-                              '&:hover': {
-                                bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
-                                transition: 'all 0.3s ease',
-                                transform: 'translateY(-1px)',
-                                boxShadow: darkMode 
-                                  ? '0 4px 12px rgba(0,0,0,0.3)' 
-                                  : '0 4px 12px rgba(0,0,0,0.1)'
-                              }
-                            }}>
-                              <Avatar sx={{ 
-                                mr: 3, 
-                                width: 64, 
-                                height: 64,
-                                borderRadius: 2,
-                                boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                                border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                    <>
+                      <Typography variant="h6" sx={{ 
+                        mb: 2, 
+                        fontWeight: 700, 
+                        color: 'primary.main',
+                        pb: 1,
+                        borderBottom: '2px solid #007aff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 1
+                      }}>
+                        <DirectionsIcon sx={{ color: 'primary.main' }} />
+                        Suggested Stops
+                      </Typography>
+                      <Paper elevation={6} sx={{ 
+                        borderRadius: 2, 
+                        bgcolor: theme.palette.background.paper, 
+                        maxHeight: 400, 
+                        overflowY: 'auto',
+                        boxShadow: darkMode 
+                          ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                          : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
+                      }}>
+                        <List sx={{ p: 0 }}>
+                          {suggestedStops.map((stop, idx) => (
+                            <React.Fragment key={stop.place_id || idx}>
+                              <ListItem sx={{ 
+                                flexDirection: 'column',
+                                alignItems: 'stretch',
+                                p: { xs: 2, sm: 3 },
+                                borderBottom: idx < suggestedStops.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
+                                '&:hover': {
+                                  bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                  transition: 'all 0.3s ease',
+                                  transform: 'translateY(-1px)',
+                                  boxShadow: darkMode 
+                                    ? '0 4px 12px rgba(0,0,0,0.3)' 
+                                    : '0 4px 12px rgba(0,0,0,0.1)'
+                                }
                               }}>
-                                {stop.photos && stop.photos[0] ? (
-                                  <img 
-                                    src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${stop.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
-                                    alt={stop.name}
-                                    style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
-                                  />
-                                ) : (
-                                  <SearchIcon sx={{ fontSize: '1.5rem' }} />
-                                )}
-                              </Avatar>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Typography variant="h6" sx={{ 
-                                  fontWeight: 700, 
-                                  mb: 1,
-                                  color: theme.palette.text.primary,
-                                  fontSize: '1.1rem',
-                                  lineHeight: 1.3
-                                }}>
-                                  {stop.name}
-                                </Typography>
-                                <Typography variant="body2" sx={{ 
-                                  color: theme.palette.text.secondary, 
-                                  mb: 1.5, 
-                                  display: 'block',
-                                  fontSize: '0.9rem',
-                                  lineHeight: 1.4
-                                }}>
-                                  {stop.formatted_address}
-                                </Typography>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1.5 }}>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <Rating 
-                                      value={stop.rating || 0} 
-                                      precision={0.1} 
-                                      readOnly 
-                                      size="small"
-                                      sx={{ 
-                                        '& .MuiRating-iconFilled': {
-                                          color: '#FFD700'
-                                        }
-                                      }}
-                                    />
-                                    <Typography variant="body2" sx={{ 
-                                      color: theme.palette.text.secondary,
-                                      fontWeight: 500,
-                                      fontSize: '0.85rem'
+                                <Box sx={{ width: '100%' }}>
+                                  {/* Top Row: Image and Basic Info */}
+                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                                    <Box sx={{ 
+                                      mr: { xs: 2, sm: 3 }, 
+                                      width: { xs: 56, sm: 64 }, 
+                                      height: { xs: 56, sm: 64 },
+                                      borderRadius: 2,
+                                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                      border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                                      flexShrink: 0,
+                                      overflow: 'hidden'
                                     }}>
-                                      {stop.rating ? `${stop.rating.toFixed(1)}` : 'No rating'}
-                                    </Typography>
+                                      {stop.photos && stop.photos[0] ? (
+                                        <img 
+                                          src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${stop.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
+                                          alt={stop.name}
+                                          style={{ 
+                                            width: '100%', 
+                                            height: '100%', 
+                                            objectFit: 'cover',
+                                            borderRadius: '6px'
+                                          }}
+                                        />
+                                      ) : (
+                                        <Box sx={{ 
+                                          width: '100%', 
+                                          height: '100%', 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          justifyContent: 'center',
+                                          bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                                          borderRadius: '6px'
+                                        }}>
+                                          <SearchIcon sx={{ fontSize: '1.5rem', color: 'text.secondary' }} />
+                                        </Box>
+                                      )}
+                                    </Box>
+                                    
+                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                      <Typography variant="h6" sx={{ 
+                                        fontWeight: 700, 
+                                        mb: 1,
+                                        color: theme.palette.text.primary,
+                                        fontSize: { xs: '1rem', sm: '1.1rem' },
+                                        lineHeight: 1.3
+                                      }}>
+                                        {stop.name}
+                                      </Typography>
+                                      
+                                      <Box sx={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 2, 
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                          <Rating 
+                                            value={stop.rating || 0} 
+                                            precision={0.1} 
+                                            readOnly 
+                                            size="small"
+                                            sx={{ 
+                                              '& .MuiRating-iconFilled': {
+                                                color: '#FFD700'
+                                              }
+                                            }}
+                                          />
+                                          <Typography variant="body2" sx={{ 
+                                            color: theme.palette.text.secondary,
+                                            fontWeight: 500,
+                                            fontSize: '0.85rem'
+                                          }}>
+                                            {stop.rating ? `${stop.rating.toFixed(1)}` : 'No rating'}
+                                          </Typography>
+                                        </Box>
+                                        {stop.user_ratings_total && (
+                                          <Typography variant="body2" sx={{ 
+                                            color: theme.palette.text.secondary,
+                                            fontSize: '0.85rem'
+                                          }}>
+                                            • {stop.user_ratings_total} reviews
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </Box>
                                   </Box>
-                                  {stop.user_ratings_total && (
-                                    <Typography variant="body2" sx={{ 
-                                      color: theme.palette.text.secondary,
-                                      fontSize: '0.85rem'
-                                    }}>
-                                      • {stop.user_ratings_total} reviews
-                                    </Typography>
+                                  
+                                  {/* Summary Section - Full Width */}
+                                  {stop.overviewReview && (
+                                    <Box sx={{ mb: 1.5 }}>
+                                      <Typography variant="caption" sx={{ 
+                                        fontWeight: 700,
+                                        color: 'primary.main',
+                                        fontSize: '0.75rem',
+                                        letterSpacing: 0.5,
+                                        textTransform: 'uppercase',
+                                        mb: 1,
+                                        display: 'block'
+                                      }}>
+                                        AI Review Summary
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ 
+                                        color: theme.palette.text.secondary,
+                                        fontSize: '0.9rem',
+                                        lineHeight: 1.4,
+                                        fontStyle: 'italic',
+                                        bgcolor: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                                        p: 1.5,
+                                        borderRadius: 1,
+                                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`
+                                      }}>
+                                        "{stop.overviewReview}"
+                                      </Typography>
+                                    </Box>
                                   )}
-                                </Box>
-                                <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+                                  
+                                  {/* Distance, Route Info, and Add Button Section - Full Width */}
                                   <Box sx={{ 
                                     display: 'flex', 
-                                    alignItems: 'center', 
-                                    gap: 0.5,
-                                    bgcolor: darkMode ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
-                                    px: 1.5,
-                                    py: 0.5,
-                                    borderRadius: 1,
-                                    border: `1px solid ${darkMode ? 'rgba(0,122,255,0.3)' : 'rgba(0,122,255,0.2)'}`
+                                    gap: 1, 
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center'
                                   }}>
-                                    <Typography variant="caption" sx={{ 
-                                      color: 'primary.main', 
-                                      fontWeight: 600,
-                                      fontSize: '0.75rem'
-                                    }}>
-                                      📍 {stop.distanceFromRoute ? `${stop.distanceFromRoute.toFixed(1)}km from route` : 'Near route'}
-                                    </Typography>
-                                  </Box>
-                                  {stop.distanceFromOrigin && (
                                     <Box sx={{ 
                                       display: 'flex', 
                                       alignItems: 'center', 
                                       gap: 0.5,
-                                      bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.08)',
+                                      bgcolor: darkMode ? 'rgba(33,150,243,0.15)' : 'rgba(33,150,243,0.1)',
                                       px: 1.5,
                                       py: 0.5,
                                       borderRadius: 1,
-                                      border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+                                      border: `1px solid ${darkMode ? 'rgba(33,150,243,0.3)' : 'rgba(33,150,243,0.2)'}`
                                     }}>
+                                      <LocationOnIcon sx={{ fontSize: '1rem', color: 'primary.main' }} />
                                       <Typography variant="caption" sx={{ 
-                                        color: 'success.main',
+                                        color: 'primary.main',
                                         fontWeight: 600,
                                         fontSize: '0.75rem'
                                       }}>
-                                        🕒 {stop.timeDisplayFromOrigin || `${Math.round(stop.distanceFromOrigin / 50 * 60)}m`} from start
+                                        {stop.distanceFromRoute ? `${stop.distanceFromRoute.toFixed(1)}km from route` : 'Near route'}
                                       </Typography>
                                     </Box>
-                                  )}
+                                    {stop.distanceFromOrigin && (
+                                      <Box sx={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 0.5,
+                                        bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.1)',
+                                        px: 1.5,
+                                        py: 0.5,
+                                        borderRadius: 1,
+                                        border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+                                      }}>
+                                        <MoodIcon sx={{ fontSize: '1rem', color: 'success.main' }} />
+                                        <Typography variant="caption" sx={{ 
+                                          color: 'success.main',
+                                          fontWeight: 600,
+                                          fontSize: '0.75rem'
+                                        }}>
+                                          {stop.timeDisplayFromOrigin || `${Math.round(stop.distanceFromOrigin / 50 * 60)}m`} from start
+                                        </Typography>
+                                      </Box>
+                                    )}
+                                    <Button
+                                      variant="contained"
+                                      size="small"
+                                      onClick={() => handleAddStopToRoute(stop)}
+                                      disabled={addingStopToRoute}
+                                      startIcon={addingStopToRoute ? <CircularProgress size={16} /> : <DirectionsIcon />}
+                                      sx={{
+                                        minWidth: 'auto',
+                                        px: 2,
+                                        py: 0.5,
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        borderRadius: 1,
+                                        bgcolor: '#007AFF',
+                                        boxShadow: '0 2px 8px rgba(0, 122, 255, 0.3)',
+                                        '&:hover': {
+                                          bgcolor: '#0056CC',
+                                          boxShadow: '0 4px 12px rgba(0, 122, 255, 0.4)',
+                                          transform: 'translateY(-1px)'
+                                        },
+                                        '&:active': {
+                                          transform: 'translateY(0)'
+                                        },
+                                        transition: 'all 0.3s ease'
+                                      }}
+                                    >
+                                      {addingStopToRoute ? 'Adding...' : 'Add'}
+                                    </Button>
+                                  </Box>
                                 </Box>
-                              </Box>
-                              
-                              <Button
-                                variant="contained"
-                                size="medium"
-                                onClick={() => handleAddStopToRoute(stop)}
-                                disabled={addingStopToRoute}
-                                startIcon={addingStopToRoute ? <CircularProgress size={16} /> : <DirectionsIcon />}
-                                sx={{
-                                  ml: 1,
-                                  minWidth: 'auto',
-                                  px: 2,
-                                  py: 1,
-                                  fontSize: '0.875rem',
-                                  fontWeight: 600,
-                                  borderRadius: 3,
-                                  bgcolor: '#007AFF',
-                                  boxShadow: '0 4px 12px rgba(0, 122, 255, 0.3)',
-                                  '&:hover': {
-                                    bgcolor: '#0056CC',
-                                    boxShadow: '0 6px 16px rgba(0, 122, 255, 0.4)',
-                                    transform: 'translateY(-1px)'
-                                  },
-                                  '&:active': {
-                                    transform: 'translateY(0)'
-                                  },
-                                  transition: 'all 0.2s ease'
-                                }}
-                              >
-                                {addingStopToRoute ? 'Adding...' : 'Add'}
-                              </Button>
-                            </ListItem>
-                            {idx < suggestedStops.length - 1 && (
-                              <Divider sx={{ mx: 2, borderColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
-                            )}
-                          </Box>
-                        ))}
-                      </List>
-                    </Paper>
+                              </ListItem>
+                              {idx < suggestedStops.length - 1 && (
+                                <Divider sx={{ mx: 2, borderColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
+                              )}
+                            </React.Fragment>
+                          ))}
+                        </List>
+                      </Paper>
+                    </>
                   )}
                   
                   {/* Added Stops */}
@@ -2384,6 +3001,7 @@ function AuthenticatedApp() {
                 My Location
               </Button>
               {isLoaded ? (
+                <>
                 <GoogleMap
                   mapContainerStyle={{ width: '100%', height: '100%', borderRadius: 0 }}
                   center={mapCenter}
@@ -2434,24 +3052,30 @@ function AuthenticatedApp() {
                   )}
 
                   {/* Search Result Markers */}
-                  {searchMarkers.map((marker) => (
-                    <Marker
-                      key={marker.id}
-                      position={marker.position}
-                      title={marker.title}
-                      icon={{
-                        url: 'http://maps.google.com/mapfiles/ms/icons/orange-dot.png',
-                        scaledSize: { width: 32, height: 32 }
-                      }}
-                      label={{
-                        text: "?",
-                        color: "#ffffff",
-                        fontSize: "14px",
-                        fontWeight: "bold",
-                        className: "marker-label"
-                      }}
-                    />
-                  ))}
+                  {searchMarkers.map((marker) => {
+                    const isHovered = hoveredPlace && hoveredPlace.title === marker.title;
+                    return (
+                      <Marker
+                        key={marker.id}
+                        position={marker.position}
+                        title={marker.title}
+                        icon={{
+                          url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+                          scaledSize: isHovered ? { width: 48, height: 48 } : { width: 32, height: 32 }
+                        }}
+                        label={{
+                          text: "?",
+                          color: "#ffffff",
+                          fontSize: isHovered ? "16px" : "14px",
+                          fontWeight: "bold",
+                          className: "marker-label"
+                        }}
+                        onMouseOver={() => setHoveredPlace(marker)}
+                        onMouseOut={() => setHoveredPlace(null)}
+                        animation={isHovered ? window.google?.maps?.Animation?.BOUNCE : null}
+                      />
+                    );
+                  })}
 
                   {/* Added Stops Markers */}
                   {addedStops.map((stop, index) => (
@@ -2511,6 +3135,31 @@ function AuthenticatedApp() {
                     </Box>
                   )}
                 </GoogleMap>
+                
+                {/* Hover Tooltip for Places */}
+                {hoveredPlace && (
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                      zIndex: 1001,
+                      bgcolor: 'rgba(0, 0, 0, 0.8)',
+                      color: 'white',
+                      borderRadius: 2,
+                      p: 1.5,
+                      fontSize: '0.875rem',
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      pointerEvents: 'none',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                    }}
+                  >
+                    {hoveredPlace.title}
+                  </Box>
+                )}
+                </>
               ) : (
                 <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Typography variant="h6" color="primary" sx={{ opacity: 0.7 }}>

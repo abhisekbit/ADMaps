@@ -149,72 +149,202 @@ app.post('/search', authenticateToken, async (req, res) => {
   console.log('Search request:', { query, userLocation });
 
   try {
-    // Use OpenAI to extract place type and location
-    const prompt = `Extract the type of place and location from this search: "${query}". 
-    If the query mentions a specific location (like "coffee shops in Singapore" or "restaurants in New York"), use that location.
-    If the query doesn't mention a specific location (like "coffee shops" or "gas stations"), respond with location: "nearby".
-    Respond as JSON with 'type' and 'location'.`;
-    
-    const aiResp = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-    });
-    const aiText = aiResp.choices[0].message.content;
-    let parsed;
-    try {
-      parsed = JSON.parse(aiText);
-    } catch (e) {
-      return res.status(500).json({ error: 'Failed to parse AI response', aiText });
-    }
-    
     // Determine search location
     let searchLocation;
-    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
-      // Use the specific location mentioned in the query
-      searchLocation = parsed.location;
-    } else if (userLocation && userLocation.lat && userLocation.lng) {
-      // Use user's current location for nearby searches
+    if (userLocation && userLocation.lat && userLocation.lng) {
+      // Use user's current location
       searchLocation = `${userLocation.lat},${userLocation.lng}`;
     } else {
       // Fallback to a default location if no user location available
-      searchLocation = 'Singapore';
+      searchLocation = '1.3521,103.8198'; // Singapore coordinates
     }
     
-    // Build search query
-    let searchQuery;
-    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
-      // Specific location mentioned
-      searchQuery = encodeURIComponent(`${parsed.type} in ${parsed.location}`);
-    } else {
-      // Nearby search using user's location
-      searchQuery = encodeURIComponent(`${parsed.type} near ${searchLocation}`);
-    }
+    // Call Google Places API directly with the search query
+    const searchQuery = encodeURIComponent(query);
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
     
-    // Call Google Places API
-    let url;
-    if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
-      // Use Text Search for specific locations
-      url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
-    } else {
-      // Use Nearby Search for user's current location
-      const placeType = parsed.type ? parsed.type.toLowerCase().replace(/\s+/g, '_') : 'establishment';
-      url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=10000&type=${placeType}&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
-    }
     console.log('Search URL:', url);
     const placesResp = await fetch(url);
     const placesData = await placesResp.json();
-    console.log('Google Places API response:', JSON.stringify(placesData, null, 2));
     
-    // Only apply ranking for nearby searches (when using Nearby Search API)
-    let places = placesData.results || [];
-    if (!parsed.location || parsed.location.toLowerCase() === 'nearby') {
-      // Apply ranking only for nearby searches
-      places = rankSearchResults(places, searchLocation);
+    if (placesData.status !== 'OK' && placesData.status !== 'ZERO_RESULTS') {
+      console.error('Google Places API error:', placesData);
+      return res.status(500).json({ error: placesData.error_message || 'Places API error' });
     }
     
-    res.json({ parsed, aiText, places, searchLocation });
+    let places = placesData.results || [];
+    
+    // If no places found, try intelligent search with OpenAI
+    if (places.length === 0 || placesData.status === 'ZERO_RESULTS') {
+      console.log('No direct results found, trying intelligent search with OpenAI...');
+      
+      try {
+        // Use OpenAI to parse the query and extract searchable location information
+        const intelligentSearchPrompt = `You are a location search assistant. The user searched for: "${query}"
+
+If this query refers to a specific place, landmark, or location concept, extract the actual place name that should be searched on Google Places.
+
+Examples:
+- "Capital of India" → "New Delhi, India"
+- "Highest mountain in the world" → "Mount Everest, Nepal"
+- "Largest city in USA" → "New York City, USA"
+- "Famous tower in Paris" → "Eiffel Tower, Paris"
+- "Statue of Liberty location" → "Statue of Liberty, New York"
+- "Best pizza place" → "pizza restaurant" (keep generic food searches as is)
+- "Coffee shops nearby" → "coffee shop" (keep generic business searches as is)
+
+Rules:
+1. If the query refers to a specific well-known location, landmark, or geographical feature, return the actual place name
+2. If it's a generic business/service search, return the simplified search term
+3. If it's already a place name, return it as is
+4. Always include country/region context when helpful
+
+Respond with only the optimized search term, nothing else.`;
+
+        const aiResponse = await openai.chat.completions.create({
+          model: 'gpt-3.5-turbo',
+          messages: [{ role: 'user', content: intelligentSearchPrompt }],
+          temperature: 0.1,
+          max_tokens: 100
+        });
+
+        const optimizedQuery = aiResponse.choices[0].message.content.trim();
+        console.log('OpenAI suggested search term:', optimizedQuery);
+
+        // Search again with the optimized query
+        if (optimizedQuery && optimizedQuery !== query) {
+          const optimizedSearchQuery = encodeURIComponent(optimizedQuery);
+          const optimizedUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${optimizedSearchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+          
+          console.log('Optimized search URL:', optimizedUrl);
+          const optimizedResp = await fetch(optimizedUrl);
+          const optimizedData = await optimizedResp.json();
+          
+          if (optimizedData.status === 'OK' && optimizedData.results && optimizedData.results.length > 0) {
+            places = optimizedData.results;
+            console.log(`Found ${places.length} results with optimized search`);
+          }
+        }
+      } catch (aiError) {
+        console.error('OpenAI intelligent search failed:', aiError);
+        // Continue with empty results if AI fails
+      }
+    }
+    
+    // Process each place to get detailed information including reviews
+    const processedPlaces = await Promise.all(places.slice(0, 10).map(async (place) => {
+      try {
+        // Get place details including reviews
+        const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=name,formatted_address,geometry,rating,user_ratings_total,photos,reviews&key=${GOOGLE_MAPS_API_KEY}`;
+        const detailsResp = await fetch(detailsUrl);
+        const detailsData = await detailsResp.json();
+        
+        if (detailsData.status === 'OK' && detailsData.result) {
+          const placeDetails = detailsData.result;
+          
+          // Process reviews with OpenAI if available
+          let overviewReview = '';
+          let sentimentScore = 0;
+          
+          if (placeDetails.reviews && placeDetails.reviews.length > 0) {
+            const topReviews = placeDetails.reviews.slice(0, 10);
+            const reviewsText = topReviews.map(review => review.text).join('\n\n');
+            
+            try {
+              // Use OpenAI to summarize reviews and analyze sentiment
+              const reviewPrompt = `Analyze the recent reviews for a place and provide:
+1. A concise overview (max 400 characters) summarizing the key points
+2. A sentiment score from -1 to 1 (negative to positive)
+
+Reviews:
+${reviewsText}
+
+Respond as JSON: {"overview": "summary", "sentiment": number}`;
+              
+              const aiResp = await openai.chat.completions.create({
+                model: 'gpt-3.5-turbo',
+                messages: [{ role: 'user', content: reviewPrompt }],
+                temperature: 0.3,
+              });
+              
+              const aiText = aiResp.choices[0].message.content;
+              try {
+                const reviewAnalysis = JSON.parse(aiText);
+                overviewReview = reviewAnalysis.overview || '';
+                sentimentScore = reviewAnalysis.sentiment || 0;
+              } catch (e) {
+                console.error('Failed to parse review analysis:', e);
+                overviewReview = 'Reviews available but analysis failed';
+                sentimentScore = 0;
+              }
+            } catch (aiError) {
+              console.error('OpenAI review analysis failed:', aiError);
+              overviewReview = 'Reviews available but analysis failed';
+              sentimentScore = 0;
+            }
+          }
+          
+          return {
+            ...place,
+            ...placeDetails,
+            overviewReview,
+            sentimentScore
+          };
+        }
+        
+        return place;
+      } catch (error) {
+        console.error('Error processing place details:', error);
+        return place;
+      }
+    }));
+    
+    // Apply enhanced ranking with sentiment analysis
+    const rankedPlaces = rankSearchResultsWithSentiment(processedPlaces, searchLocation);
+    
+    res.json({ 
+      places: rankedPlaces, 
+      searchLocation,
+      totalResults: places.length,
+      intelligentSearchUsed: placesData.results?.length === 0 && places.length > 0
+    });
   } catch (err) {
+    console.error('Search error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Google Places Autocomplete API endpoint
+app.post('/autocomplete', authenticateToken, async (req, res) => {
+  const { input, userLocation } = req.body;
+  if (!input || input.trim().length < 2) {
+    return res.json({ predictions: [] });
+  }
+
+  console.log('Autocomplete request:', { input, userLocation });
+
+  try {
+    // Build autocomplete URL with location bias if user location is available
+    let url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(input)}&key=${GOOGLE_MAPS_API_KEY}&types=establishment`;
+    
+    // Add location bias if user location is available
+    if (userLocation && userLocation.lat && userLocation.lng) {
+      url += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+    }
+    
+    console.log('Autocomplete URL:', url);
+    const response = await fetch(url);
+    const data = await response.json();
+    
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      console.error('Google Places Autocomplete API error:', data);
+      return res.status(500).json({ error: data.error_message || 'Autocomplete API error' });
+    }
+    
+    console.log('Autocomplete response:', JSON.stringify(data, null, 2));
+    res.json({ predictions: data.predictions || [] });
+  } catch (err) {
+    console.error('Autocomplete error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -574,10 +704,83 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
       return a.distanceFromRoute - b.distanceFromRoute;
     });
 
+    // Get top 5 places and enhance with review summaries
+    const topPlaces = rankedPlaces.slice(0, 5);
+    
+    // Enhance places with detailed information including reviews
+    for (const place of topPlaces) {
+      try {
+        // Fetch detailed place information including reviews
+        const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=reviews,photos,formatted_address,rating,user_ratings_total&key=${GOOGLE_MAPS_API_KEY}`;
+        const detailsResponse = await fetch(detailsUrl);
+        const detailsData = await detailsResponse.json();
+        
+        if (detailsData.status === 'OK' && detailsData.result) {
+          const placeDetails = detailsData.result;
+          
+          // Add detailed information to place
+          if (placeDetails.photos) place.photos = placeDetails.photos;
+          if (placeDetails.formatted_address) place.formatted_address = placeDetails.formatted_address;
+          if (placeDetails.rating) place.rating = placeDetails.rating;
+          if (placeDetails.user_ratings_total) place.user_ratings_total = placeDetails.user_ratings_total;
+          
+          // Process reviews for summarization
+          if (placeDetails.reviews && placeDetails.reviews.length > 0) {
+            const topReviews = placeDetails.reviews.slice(0, 10);
+            const reviewTexts = topReviews.map(review => review.text).join('\n\n');
+            
+            try {
+              // Get review summary and sentiment from OpenAI
+              const reviewPrompt = `Analyze these Google reviews for a business and provide:
+              1. A 400-character summary capturing the overall experience and key highlights
+              2. A sentiment score from -1 (very negative) to 1 (very positive)
+              
+              Reviews:
+              ${reviewTexts}
+              
+              Please respond in JSON format:
+              {
+                "summary": "400-character summary here",
+                "sentiment": 0.7
+              }`;
+              
+              const reviewCompletion = await openai.chat.completions.create({
+                model: "gpt-3.5-turbo",
+                messages: [{ role: "user", content: reviewPrompt }],
+                max_tokens: 300,
+                temperature: 0.3,
+              });
+              
+              const reviewResponse = reviewCompletion.choices[0].message.content.trim();
+              
+              try {
+                const reviewAnalysis = JSON.parse(reviewResponse);
+                place.overviewReview = reviewAnalysis.summary;
+                place.sentimentScore = reviewAnalysis.sentiment;
+              } catch (parseError) {
+                console.error('Error parsing review analysis JSON:', parseError);
+                // Fallback to basic summary
+                place.overviewReview = `Based on ${topReviews.length} reviews. Average rating: ${place.rating || 'Not available'}.`;
+                place.sentimentScore = 0;
+              }
+            } catch (openaiError) {
+              console.error('Error getting review summary from OpenAI:', openaiError);
+              // Fallback summary
+              place.overviewReview = `Based on ${topReviews.length} reviews. Average rating: ${place.rating || 'Not available'}.`;
+              place.sentimentScore = 0;
+            }
+          }
+        }
+      } catch (detailsError) {
+        console.error('Error fetching place details:', detailsError);
+        // Continue with basic place information
+      }
+    }
+
     res.json({
       parsed,
       aiText,
-      suggestedStops: rankedPlaces.slice(0, 5),
+      suggestedStops: topPlaces,
       searchLocation: searchLocation,
       searchInfo: {
         timing: parsed.timing,
@@ -614,10 +817,39 @@ app.post('/add-stop-to-route', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Missing origin, destination, or stop' });
   }
 
+  console.log('Add stop request received:', { origin, destination, stop: stop.name });
+
   try {
-    const originStr = typeof origin === 'string' ? origin : `${origin.lat},${origin.lng}`;
-    const destStr = typeof destination === 'string' ? destination : `${destination.lat},${destination.lng}`;
+    // Validate origin coordinates
+    let originStr;
+    if (typeof origin === 'string') {
+      originStr = origin;
+    } else if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number') {
+      originStr = `${origin.lat},${origin.lng}`;
+    } else {
+      console.error('Invalid origin coordinates:', origin);
+      return res.status(400).json({ error: 'Invalid origin coordinates. Please ensure navigation is started properly.' });
+    }
+
+    // Validate destination coordinates
+    let destStr;
+    if (typeof destination === 'string') {
+      destStr = destination;
+    } else if (destination && typeof destination.lat === 'number' && typeof destination.lng === 'number') {
+      destStr = `${destination.lat},${destination.lng}`;
+    } else {
+      console.error('Invalid destination coordinates:', destination);
+      return res.status(400).json({ error: 'Invalid destination coordinates' });
+    }
+
+    // Validate stop coordinates
+    if (!stop.geometry?.location?.lat || !stop.geometry?.location?.lng) {
+      console.error('Invalid stop coordinates:', stop.geometry?.location);
+      return res.status(400).json({ error: 'Invalid stop coordinates' });
+    }
     const stopStr = `${stop.geometry.location.lat},${stop.geometry.location.lng}`;
+    
+    console.log('Coordinate strings:', { originStr, destStr, stopStr });
     
     // Get route with waypoint
     const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}&waypoints=${encodeURIComponent(stopStr)}&key=${GOOGLE_MAPS_API_KEY}`;
@@ -646,9 +878,30 @@ app.post('/recalculate-route', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Missing origin or destination' });
   }
 
+  console.log('Recalculate route request received:', { origin, destination, stopCount: stops?.length || 0 });
+
   try {
-    const originStr = typeof origin === 'string' ? origin : `${origin.lat},${origin.lng}`;
-    const destStr = typeof destination === 'string' ? destination : `${destination.lat},${destination.lng}`;
+    // Validate origin coordinates
+    let originStr;
+    if (typeof origin === 'string') {
+      originStr = origin;
+    } else if (origin && typeof origin.lat === 'number' && typeof origin.lng === 'number') {
+      originStr = `${origin.lat},${origin.lng}`;
+    } else {
+      console.error('Invalid origin coordinates:', origin);
+      return res.status(400).json({ error: 'Invalid origin coordinates. Please ensure navigation is started properly.' });
+    }
+
+    // Validate destination coordinates
+    let destStr;
+    if (typeof destination === 'string') {
+      destStr = destination;
+    } else if (destination && typeof destination.lat === 'number' && typeof destination.lng === 'number') {
+      destStr = `${destination.lat},${destination.lng}`;
+    } else {
+      console.error('Invalid destination coordinates:', destination);
+      return res.status(400).json({ error: 'Invalid destination coordinates' });
+    }
     
     let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(originStr)}&destination=${encodeURIComponent(destStr)}`;
     
@@ -729,6 +982,55 @@ function rankSearchResults(places, searchLocation) {
         distanceScore: Math.round(distanceScore * 100) / 100,
         ratingScore: Math.round(ratingScore * 100) / 100,
         reviewCountScore: Math.round(reviewCountScore * 100) / 100,
+        distance: Math.round(distance * 100) / 100
+      }
+    };
+  }).sort((a, b) => b._ranking.totalScore - a._ranking.totalScore);
+}
+
+// Enhanced ranking function with sentiment analysis
+function rankSearchResultsWithSentiment(places, searchLocation) {
+  if (!places || places.length === 0) return [];
+  
+  // Parse search location
+  const [searchLat, searchLng] = searchLocation.split(',').map(Number);
+  
+  return places.map(place => {
+    // Calculate distance from search location
+    const distance = calculateDistance(
+      searchLat, 
+      searchLng, 
+      place.geometry.location.lat, 
+      place.geometry.location.lng
+    );
+    
+    // Calculate review score (0-100)
+    const reviewScore = place.rating ? (place.rating / 5) * 100 : 0;
+    const reviewCount = place.user_ratings_total || 0;
+    
+    // Enhanced scoring system with sentiment analysis
+    // Distance weight: 30% (closer is better)
+    // Rating weight: 30% (higher rating is better)
+    // Review count weight: 15% (more reviews = more reliable)
+    // Sentiment weight: 25% (positive sentiment is better)
+    
+    const distanceScore = Math.max(0, 100 - (distance * 10)); // 10km = 0 score, 0km = 100 score
+    const ratingScore = reviewScore;
+    const reviewCountScore = Math.min(100, (reviewCount / 100) * 100); // Cap at 100 reviews
+    
+    // Convert sentiment score from -1 to 1 range to 0 to 100 range
+    const sentimentScore = place.sentimentScore ? ((place.sentimentScore + 1) / 2) * 100 : 50; // Default to neutral if no sentiment
+    
+    const totalScore = (distanceScore * 0.3) + (ratingScore * 0.3) + (reviewCountScore * 0.15) + (sentimentScore * 0.25);
+    
+    return {
+      ...place,
+      _ranking: {
+        totalScore: Math.round(totalScore * 100) / 100,
+        distanceScore: Math.round(distanceScore * 100) / 100,
+        ratingScore: Math.round(ratingScore * 100) / 100,
+        reviewCountScore: Math.round(reviewCountScore * 100) / 100,
+        sentimentScore: Math.round(sentimentScore * 100) / 100,
         distance: Math.round(distance * 100) / 100
       }
     };
