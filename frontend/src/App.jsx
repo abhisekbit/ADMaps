@@ -353,15 +353,22 @@ function AuthenticatedApp() {
       // Show all search results on the map
       if (data.places && data.places.length > 0) {
         // Create markers for all search results
-        const markers = data.places.map((place, index) => ({
-          id: place.place_id || `search-${index}`,
-          position: {
-            lat: place.geometry.location.lat,
-            lng: place.geometry.location.lng
-          },
-          title: place.name,
-          type: 'search-result'
-        }));
+        const markers = data.places
+          .filter(place => 
+            place.geometry?.location?.lat && 
+            place.geometry?.location?.lng &&
+            typeof place.geometry.location.lat === 'number' &&
+            typeof place.geometry.location.lng === 'number'
+          )
+          .map((place, index) => ({
+            id: place.place_id || `search-${index}`,
+            position: {
+              lat: parseFloat(place.geometry.location.lat),
+              lng: parseFloat(place.geometry.location.lng)
+            },
+            title: place.name,
+            type: 'search-result'
+          }));
         setSearchMarkers(markers);
         
         // Set map center to first result
@@ -642,10 +649,10 @@ function AuthenticatedApp() {
       // Determine origin (starting point or current location)
       let origin;
       if (startingPointLocation) {
-        // Use selected starting point location
+        // Use selected starting point location (coordinates)
         origin = startingPointLocation;
       } else if (startingPoint.trim()) {
-        // Use provided starting point as string
+        // Use provided starting point as string for Google Directions API
         origin = startingPoint.trim();
       } else {
         // Get current location with secure origin fallback
@@ -686,6 +693,7 @@ function AuthenticatedApp() {
       }
       
       // Store the navigation origin for search along route
+      // For string origins, we'll get the actual coordinates from the directions response
       setNavigationOrigin(origin);
       
       // Get directions
@@ -709,6 +717,16 @@ function AuthenticatedApp() {
       // Don't set map center here, let fitBounds handle it
       // setMapCenter(selectedPlace.geometry.location);
       setRouteSteps(data.legs.flatMap(leg => leg.steps));
+      
+      // Extract actual starting coordinates from the directions response
+      if (data.legs && data.legs.length > 0 && data.legs[0].start_location) {
+        const actualStartCoords = {
+          lat: data.legs[0].start_location.lat,
+          lng: data.legs[0].start_location.lng
+        };
+        console.log('Updating navigationOrigin with actual coordinates:', actualStartCoords);
+        setNavigationOrigin(actualStartCoords);
+      }
       
       // Store route information (distance and duration)
       if (data.legs && data.legs.length > 0) {
@@ -963,7 +981,32 @@ function AuthenticatedApp() {
     
     try {
       // Use the navigation origin (starting point of the route) for searching stops
-      const searchOrigin = navigationOrigin || currentLocation;
+      let searchOrigin = navigationOrigin || currentLocation;
+      console.log('Search stops - navigationOrigin:', navigationOrigin);
+      console.log('Search stops - currentLocation:', currentLocation);
+      console.log('Search stops - searchOrigin:', searchOrigin);
+      
+      // Ensure searchOrigin is coordinates, not a string
+      if (typeof searchOrigin === 'string') {
+        // If it's a string, we need to use the actual starting point from the route
+        // Try to get coordinates from startingPointLocation or fallback to currentLocation
+        if (startingPointLocation && typeof startingPointLocation === 'object') {
+          searchOrigin = startingPointLocation;
+          console.log('Using startingPointLocation as coordinates:', searchOrigin);
+        } else {
+          // Fallback to current location coordinates
+          searchOrigin = currentLocation;
+          console.log('Fallback to currentLocation coordinates:', searchOrigin);
+        }
+      }
+      
+      // Validate that we have proper coordinates
+      if (!searchOrigin || typeof searchOrigin !== 'object' || 
+          typeof searchOrigin.lat !== 'number' || typeof searchOrigin.lng !== 'number') {
+        throw new Error('Invalid starting coordinates. Please ensure navigation is started properly.');
+      }
+      
+      console.log('Final searchOrigin coordinates:', searchOrigin);
       
       const resp = await fetch('/add-stop', {
         method: "POST",
@@ -984,15 +1027,22 @@ function AuthenticatedApp() {
       setSearchInfo(data.searchInfo || null);
       
       // Create markers for search results
-      const markers = (data.suggestedStops || []).map((stop, index) => ({
-        id: stop.place_id || `stop-${index}`,
-        position: {
-          lat: stop.geometry.location.lat,
-          lng: stop.geometry.location.lng
-        },
-        title: stop.name,
-        type: 'search-result'
-      }));
+      const markers = (data.suggestedStops || [])
+        .filter(stop => 
+          stop.geometry?.location?.lat && 
+          stop.geometry?.location?.lng &&
+          typeof stop.geometry.location.lat === 'number' &&
+          typeof stop.geometry.location.lng === 'number'
+        )
+        .map((stop, index) => ({
+          id: stop.place_id || `stop-${index}`,
+          position: {
+            lat: parseFloat(stop.geometry.location.lat),
+            lng: parseFloat(stop.geometry.location.lng)
+          },
+          title: stop.name,
+          type: 'search-result'
+        }));
       setSearchMarkers(markers);
     } catch (err) {
       setError(err.message || "Failed to search for stops");
@@ -2009,7 +2059,7 @@ function AuthenticatedApp() {
                                   mb: 1,
                                   display: 'block'
                                 }}>
-                                  AI Review Summary
+                                  AI Highlights: What people are saying
                                 </Typography>
                                 <Typography variant="body2" sx={{ 
                                   color: theme.palette.text.secondary,
@@ -2735,7 +2785,7 @@ function AuthenticatedApp() {
                                         mb: 1,
                                         display: 'block'
                                       }}>
-                                        AI Review Summary
+                                        AI Highlights: What people are saying
                                       </Typography>
                                       <Typography variant="body2" sx={{ 
                                         color: theme.palette.text.secondary,
@@ -2842,103 +2892,220 @@ function AuthenticatedApp() {
                   
                   {/* Added Stops */}
                   {addedStops.length > 0 && (
-                    <Paper elevation={4} sx={{ 
-                      p: 0, 
-                      borderRadius: 0, 
+                    <Paper elevation={6} sx={{ 
+                      mt: 2,
+                      borderRadius: 2,
+                      overflow: 'hidden',
                       bgcolor: 'background.paper',
                       boxShadow: darkMode 
-                        ? '0 8px 24px rgba(0,0,0,0.3), 0 2px 8px rgba(0,0,0,0.15)'
-                        : '0 8px 24px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)',
-                      overflow: 'hidden',
-                      mt: 2
+                        ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                        : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
                     }}>
-                      <Box sx={{ p: 2, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`, bgcolor: darkMode ? 'rgba(255,149,0,0.1)' : 'rgba(255,149,0,0.05)' }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#FF9500' }}>
-                          🛑 Added Stops
+                      <Box sx={{ 
+                        p: { xs: 2, sm: 3 }, 
+                        bgcolor: darkMode ? 'rgba(255,149,0,0.1)' : 'rgba(255,149,0,0.05)',
+                        borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`
+                      }}>
+                        <Typography variant="h6" sx={{ 
+                          fontWeight: 700, 
+                          color: '#FF9500',
+                          fontSize: { xs: '1rem', sm: '1.1rem' }
+                        }}>
+                          Added Stops
                         </Typography>
                       </Box>
-                      <List sx={{ maxHeight: 300, overflowY: 'auto', p: 0 }}>
-                        {addedStops.map((stop, index) => (
-                          <Box key={stop.place_id || index}>
-                            <ListItem sx={{ 
-                              alignItems: 'flex-start', 
-                              p: 2,
-                              '&:hover': {
-                                bgcolor: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'
-                              }
-                            }}>
-                              <Avatar
-                                sx={{ 
-                                  mr: 2, 
-                                  width: 48, 
-                                  height: 48, 
-                                  borderRadius: 2,
-                                  bgcolor: '#FF9500',
-                                  fontWeight: 'bold',
-                                  fontSize: '1rem'
-                                }}
-                              >
-                                {index + 1}
-                              </Avatar>
-                              
-                              <ListItemText
-                                primary={
-                                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5, color: 'text.primary' }}>
-                                    {stop.name}
-                                  </Typography>
+                      <Box sx={{ 
+                        maxHeight: 400, 
+                        overflowY: 'auto',
+                        boxShadow: darkMode 
+                          ? '0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3)' 
+                          : '0 12px 40px rgba(0,0,0,0.15), 0 6px 20px rgba(0,0,0,0.1)',
+                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'}`
+                      }}>
+                        <List sx={{ p: 0 }}>
+                          {addedStops.map((stop, index) => (
+                            <React.Fragment key={stop.place_id || index}>
+                              <ListItem sx={{ 
+                                flexDirection: 'column',
+                                alignItems: 'stretch',
+                                p: { xs: 2, sm: 3 },
+                                borderBottom: index < addedStops.length - 1 ? `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}` : 'none',
+                                '&:hover': {
+                                  bgcolor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
+                                  transition: 'all 0.3s ease',
+                                  transform: 'translateY(-1px)',
+                                  boxShadow: darkMode 
+                                    ? '0 4px 12px rgba(0,0,0,0.3)' 
+                                    : '0 4px 12px rgba(0,0,0,0.1)'
                                 }
-                                secondary={
-                                  <Box>
-                                    <Typography variant="caption" sx={{ color: 'text.secondary', mb: 1, display: 'block' }}>
-                                      {stop.formatted_address}
-                                    </Typography>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                      <Rating value={stop.rating || 0} precision={0.1} readOnly size="small" />
-                                      {stop.user_ratings_total && (
-                                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                                          ({stop.user_ratings_total})
-                                        </Typography>
+                              }}>
+                                <Box sx={{ width: '100%' }}>
+                                  {/* Top Row: Image and Basic Info */}
+                                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                                    <Box sx={{ 
+                                      mr: { xs: 2, sm: 3 }, 
+                                      width: { xs: 56, sm: 64 }, 
+                                      height: { xs: 56, sm: 64 },
+                                      borderRadius: 2,
+                                      boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                      border: `2px solid ${darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                                      flexShrink: 0,
+                                      overflow: 'hidden'
+                                    }}>
+                                      {stop.photos && stop.photos[0] ? (
+                                        <img 
+                                          src={`https://maps.googleapis.com/maps/api/place/photo?maxwidth=128&photo_reference=${stop.photos[0].photo_reference}&key=${MAPS_API_KEY}`}
+                                          alt={stop.name}
+                                          style={{ 
+                                            width: '100%', 
+                                            height: '100%', 
+                                            objectFit: 'cover',
+                                            borderRadius: '6px'
+                                          }}
+                                        />
+                                      ) : (
+                                        <Box sx={{ 
+                                          width: '100%', 
+                                          height: '100%', 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          justifyContent: 'center',
+                                          bgcolor: '#FF9500',
+                                          borderRadius: '6px'
+                                        }}>
+                                          <Typography sx={{ 
+                                            color: '#fff', 
+                                            fontWeight: 'bold',
+                                            fontSize: '1.2rem'
+                                          }}>
+                                            {index + 1}
+                                          </Typography>
+                                        </Box>
                                       )}
                                     </Box>
+                                    
+                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                      <Typography variant="h6" sx={{ 
+                                        fontWeight: 700, 
+                                        mb: 1,
+                                        color: theme.palette.text.primary,
+                                        fontSize: { xs: '1rem', sm: '1.1rem' },
+                                        lineHeight: 1.3
+                                      }}>
+                                        {stop.name}
+                                      </Typography>
+                                      
+                                      <Box sx={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 2, 
+                                        flexWrap: 'wrap'
+                                      }}>
+                                        {stop.rating && (
+                                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                            <Rating 
+                                              value={stop.rating || 0} 
+                                              precision={0.1} 
+                                              readOnly 
+                                              size="small"
+                                              sx={{ 
+                                                '& .MuiRating-iconFilled': {
+                                                  color: '#FFD700'
+                                                }
+                                              }}
+                                            />
+                                            <Typography variant="body2" sx={{ 
+                                              color: theme.palette.text.secondary,
+                                              fontWeight: 500,
+                                              fontSize: '0.85rem'
+                                            }}>
+                                              {stop.rating ? `${stop.rating.toFixed(1)}` : 'No rating'}
+                                            </Typography>
+                                          </Box>
+                                        )}
+                                        {stop.user_ratings_total && (
+                                          <Typography variant="body2" sx={{ 
+                                            color: theme.palette.text.secondary,
+                                            fontSize: '0.85rem'
+                                          }}>
+                                            • {stop.user_ratings_total} reviews
+                                          </Typography>
+                                        )}
+                                      </Box>
+                                    </Box>
                                   </Box>
-                                }
-                              />
-                              
-                              <Button
-                                variant="outlined"
-                                size="medium"
-                                onClick={() => handleRemoveStop(stop)}
-                                sx={{
-                                  ml: 1,
-                                  minWidth: 'auto',
-                                  px: 2,
-                                  py: 1,
-                                  fontSize: '0.875rem',
-                                  fontWeight: 600,
-                                  borderRadius: 3,
-                                  color: '#FF3B30',
-                                  borderColor: '#FF3B30',
-                                  '&:hover': {
-                                    borderColor: '#D70015',
-                                    bgcolor: '#FF3B30',
-                                    color: '#fff',
-                                    transform: 'translateY(-1px)'
-                                  },
-                                  '&:active': {
-                                    transform: 'translateY(0)'
-                                  },
-                                  transition: 'all 0.2s ease'
-                                }}
-                              >
-                                Remove
-                              </Button>
-                            </ListItem>
-                            {index < addedStops.length - 1 && (
-                              <Divider sx={{ mx: 2, borderColor: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
-                            )}
-                          </Box>
-                        ))}
-                      </List>
+                                  
+                                  {/* AI Review Summary Section - Full Width */}
+                                  {stop.overviewReview && (
+                                    <Box sx={{ mb: 1.5 }}>
+                                      <Typography variant="caption" sx={{ 
+                                        fontWeight: 700,
+                                        color: 'primary.main',
+                                        fontSize: '0.75rem',
+                                        letterSpacing: 0.5,
+                                        textTransform: 'uppercase',
+                                        mb: 1,
+                                        display: 'block'
+                                      }}>
+                                        AI Highlights: What people are saying
+                                      </Typography>
+                                      <Typography variant="body2" sx={{ 
+                                        color: theme.palette.text.secondary,
+                                        fontSize: '0.9rem',
+                                        lineHeight: 1.4,
+                                        fontStyle: 'italic',
+                                        bgcolor: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
+                                        p: 1.5,
+                                        borderRadius: 1,
+                                        border: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'}`
+                                      }}>
+                                        "{stop.overviewReview}"
+                                      </Typography>
+                                    </Box>
+                                  )}
+                                  
+                                  {/* Action Button Section - Full Width */}
+                                  <Box sx={{ 
+                                    display: 'flex', 
+                                    gap: 1, 
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end'
+                                  }}>
+                                    <Button
+                                      variant="outlined"
+                                      size="small"
+                                      onClick={() => handleRemoveStop(stop)}
+                                      sx={{
+                                        borderRadius: 1,
+                                        px: 2,
+                                        py: 0.5,
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        color: '#FF3B30',
+                                        borderColor: '#FF3B30',
+                                        '&:hover': {
+                                          borderColor: '#D70015',
+                                          bgcolor: '#FF3B30',
+                                          color: '#fff',
+                                          transform: 'translateY(-1px)'
+                                        },
+                                        '&:active': {
+                                          transform: 'translateY(0)'
+                                        },
+                                        transition: 'all 0.2s ease'
+                                      }}
+                                    >
+                                      Remove Stop
+                                    </Button>
+                                  </Box>
+                                </Box>
+                              </ListItem>
+                            </React.Fragment>
+                          ))}
+                        </List>
+                      </Box>
                     </Paper>
                   )}
                 </AccordionDetails>
@@ -3014,9 +3181,16 @@ function AuthenticatedApp() {
                   <TrafficLayer />
 
                   {/* Origin Marker (Start Point) */}
-                  {routePolyline && navigationOrigin && (
+                  {routePolyline && navigationOrigin && 
+                   ((typeof navigationOrigin === 'object' && 
+                     typeof navigationOrigin.lat === 'number' && 
+                     typeof navigationOrigin.lng === 'number') || 
+                    typeof navigationOrigin === 'string') && (
                     <Marker
-                      position={navigationOrigin}
+                      position={typeof navigationOrigin === 'object' 
+                        ? { lat: parseFloat(navigationOrigin.lat), lng: parseFloat(navigationOrigin.lng) }
+                        : navigationOrigin
+                      }
                       title="Starting Point"
                       icon={{
                         url: 'http://maps.google.com/mapfiles/ms/icons/ltblue-dot.png',
@@ -3033,9 +3207,14 @@ function AuthenticatedApp() {
                   )}
 
                   {/* Destination Marker */}
-                  {routePolyline && selectedPlace && selectedPlace.geometry?.location && (
+                  {routePolyline && selectedPlace && selectedPlace.geometry?.location && 
+                   typeof selectedPlace.geometry.location.lat === 'number' &&
+                   typeof selectedPlace.geometry.location.lng === 'number' && (
                     <Marker
-                      position={{ lat: selectedPlace.geometry.location.lat, lng: selectedPlace.geometry.location.lng }}
+                      position={{ 
+                        lat: parseFloat(selectedPlace.geometry.location.lat), 
+                        lng: parseFloat(selectedPlace.geometry.location.lng) 
+                      }}
                       title={selectedPlace.name}
                       icon={{
                         url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
@@ -3052,19 +3231,30 @@ function AuthenticatedApp() {
                   )}
 
                   {/* Search Result Markers */}
-                  {searchMarkers.map((marker) => {
+                  {searchMarkers
+                    .filter(marker => 
+                      marker.position && 
+                      typeof marker.position.lat === 'number' &&
+                      typeof marker.position.lng === 'number'
+                    )
+                    .map((marker) => {
                     const isHovered = hoveredPlace && hoveredPlace.title === marker.title;
                     return (
                       <Marker
                         key={marker.id}
-                        position={marker.position}
+                        position={{
+                          lat: parseFloat(marker.position.lat),
+                          lng: parseFloat(marker.position.lng)
+                        }}
                         title={marker.title}
                         icon={{
-                          url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
+                          url: marker.type === 'search-result' 
+                            ? 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+                            : 'http://maps.google.com/mapfiles/ms/icons/red-dot.png',
                           scaledSize: isHovered ? { width: 48, height: 48 } : { width: 32, height: 32 }
                         }}
                         label={{
-                          text: "?",
+                          text: marker.type === 'search-result' ? "S" : "?",
                           color: "#ffffff",
                           fontSize: isHovered ? "16px" : "14px",
                           fontWeight: "bold",
@@ -3078,10 +3268,20 @@ function AuthenticatedApp() {
                   })}
 
                   {/* Added Stops Markers */}
-                  {addedStops.map((stop, index) => (
+                  {addedStops
+                    .filter(stop => 
+                      stop.geometry?.location?.lat && 
+                      stop.geometry?.location?.lng &&
+                      typeof stop.geometry.location.lat === 'number' &&
+                      typeof stop.geometry.location.lng === 'number'
+                    )
+                    .map((stop, index) => (
                     <Marker
                       key={stop.place_id || index}
-                      position={{ lat: stop.geometry.location.lat, lng: stop.geometry.location.lng }}
+                      position={{ 
+                        lat: parseFloat(stop.geometry.location.lat), 
+                        lng: parseFloat(stop.geometry.location.lng) 
+                      }}
                       title={`Stop ${index + 1}: ${stop.name}`}
                       icon={{
                         url: 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png',

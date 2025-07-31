@@ -370,8 +370,25 @@ app.post('/directions', authenticateToken, async (req, res) => {
 
 app.post('/add-stop', authenticateToken, async (req, res) => {
   const { routePolyline, currentLocation, stopQuery } = req.body;
+  console.log('Add stop request received:', { 
+    routePolyline: routePolyline ? 'present' : 'missing',
+    currentLocation, 
+    currentLocationType: typeof currentLocation,
+    stopQuery 
+  });
+  
   if (!routePolyline || !currentLocation || !stopQuery) {
     return res.status(400).json({ error: 'Missing routePolyline, currentLocation, or stopQuery' });
+  }
+  
+  // Validate that currentLocation is proper coordinates
+  if (typeof currentLocation !== 'object' || 
+      typeof currentLocation.lat !== 'number' || 
+      typeof currentLocation.lng !== 'number') {
+    return res.status(400).json({ 
+      error: 'Invalid currentLocation format. Expected coordinates object with lat/lng numbers.',
+      received: currentLocation
+    });
   }
   
   // currentLocation here will be the starting position (if defined) or current location from frontend
@@ -433,6 +450,11 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
 
     // Decode the route polyline to get route points
     const routePoints = decodePolyline(routePolyline);
+    console.log(`Decoded ${routePoints.length} route points from polyline`);
+    if (routePoints.length > 0) {
+      console.log(`First route point: ${routePoints[0].lat}, ${routePoints[0].lng}`);
+      console.log(`Last route point: ${routePoints[routePoints.length-1].lat}, ${routePoints[routePoints.length-1].lng}`);
+    }
     
     // Determine search location based on constraints
     let searchLocation = currentLocation;
@@ -505,6 +527,8 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     // Apply distance constraint if specified and no location was found
     if (parsed.distance && parsed.distance > 0 && (!parsed.location || !parsed.location.trim())) {
       console.log(`Searching for ${parsed.type} after ${parsed.distance}km from start`);
+      console.log(`Route has ${routePoints.length} points`);
+      console.log(`Starting from currentLocation:`, currentLocation);
       
       // Find the point along the route that's approximately this distance from start
       let accumulatedDistance = 0;
@@ -517,6 +541,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
           currentLocation.lat, currentLocation.lng,
           routePoints[0].lat, routePoints[0].lng
         );
+        console.log(`Initial distance from start to first route point: ${initialDistance.toFixed(2)}km`);
         accumulatedDistance += initialDistance;
         
         if (accumulatedDistance >= parsed.distance) {
@@ -526,6 +551,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
             lat: currentLocation.lat + (routePoints[0].lat - currentLocation.lat) * ratio,
             lng: currentLocation.lng + (routePoints[0].lng - currentLocation.lng) * ratio
           };
+          console.log(`Target found between start and first route point at: ${targetPoint.lat}, ${targetPoint.lng}`);
           foundTargetPoint = true;
         }
       }
@@ -551,12 +577,21 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
               lat: prevPoint.lat + (currPoint.lat - prevPoint.lat) * segmentRatio,
               lng: prevPoint.lng + (currPoint.lng - prevPoint.lng) * segmentRatio
             };
+            console.log(`Found target point at segment ${i}: ${targetPoint.lat}, ${targetPoint.lng} (distance: ${newAccumulatedDistance.toFixed(1)}km)`);
             foundTargetPoint = true;
           } else {
             accumulatedDistance = newAccumulatedDistance;
             targetPoint = currPoint; // Update to current point
+            if (i % 10 === 0) { // Log every 10th point to avoid spam
+              console.log(`Segment ${i}: accumulated ${accumulatedDistance.toFixed(1)}km (need ${parsed.distance}km)`);
+            }
           }
         }
+      }
+      
+      if (!foundTargetPoint) {
+        console.log(`Warning: Reached end of route without finding ${parsed.distance}km point. Route total: ${accumulatedDistance.toFixed(1)}km`);
+        console.log(`Using last route point as target: ${targetPoint.lat}, ${targetPoint.lng}`);
       }
       
       searchLocation = targetPoint;
