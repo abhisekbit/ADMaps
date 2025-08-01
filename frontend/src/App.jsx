@@ -323,8 +323,13 @@ function AuthenticatedApp() {
     setRouteInfo(null);
     setRouteKey(prev => prev + 1);
     
+    // Check if query contains "where" or "what" or "which" for intelligent search
+    const queryLower = search.toLowerCase();
+    const shouldUseIntelligentSearch = queryLower.includes('where') || queryLower.includes('what') || queryLower.includes('which') ;
+    
     console.log('🔍 Search request details:');
     console.log('  Query:', search);
+    console.log('  Intelligent Search:', shouldUseIntelligentSearch);
     console.log('  Current Location:', currentLocation);
     console.log('  Map Center:', mapCenter);
     console.log('  Location Source:', currentLocation === singaporeCenter ? 'Default (Singapore)' : 'User Location');
@@ -338,7 +343,8 @@ function AuthenticatedApp() {
         },
         body: JSON.stringify({ 
           query: search,
-          userLocation: currentLocation // Send user's current location
+          userLocation: currentLocation, // Send user's current location
+          useIntelligentSearch: shouldUseIntelligentSearch // Flag for intelligent search
         })
       });
       

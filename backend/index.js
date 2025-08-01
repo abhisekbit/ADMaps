@@ -110,6 +110,10 @@ app.post('/test-location', async (req, res) => {
     if (parsed.location && parsed.location.toLowerCase() !== 'nearby') {
       // Use Text Search for specific locations
       url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+      // Add location bias if user location is available
+      if (userLocation && userLocation.lat && userLocation.lng) {
+        url += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+      }
     } else {
       // Use Nearby Search for user's current location
       url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${searchLocation}&radius=5000&type=cafe&keyword=${encodeURIComponent(parsed.type)}&key=${GOOGLE_MAPS_API_KEY}`;
@@ -151,10 +155,10 @@ app.post('/login', (req, res) => {
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 app.post('/search', authenticateToken, async (req, res) => {
-  const { query, userLocation } = req.body;
+  const { query, userLocation, useIntelligentSearch } = req.body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
 
-  console.log('Search request:', { query, userLocation });
+  console.log('Search request:', { query, userLocation, useIntelligentSearch });
 
   try {
     // Get current configuration
@@ -171,7 +175,12 @@ app.post('/search', authenticateToken, async (req, res) => {
     
     // Call Google Places API directly with the search query
     const searchQuery = encodeURIComponent(query);
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+    let url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+    
+    // Add location bias if user location is available
+    if (userLocation && userLocation.lat && userLocation.lng) {
+      url += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+    }
     
     console.log('Search URL:', url);
     const placesResp = await fetch(url);
@@ -184,8 +193,8 @@ app.post('/search', authenticateToken, async (req, res) => {
     
     let places = placesData.results || [];
     
-    // If no places found, try intelligent search with OpenAI
-    if (places.length === 0 || placesData.status === 'ZERO_RESULTS') {
+    // Use intelligent search if flag is set or if no places found
+    if (useIntelligentSearch || places.length === 0 || placesData.status === 'ZERO_RESULTS') {
       console.log('No direct results found, trying intelligent search with OpenAI...');
       
       try {
@@ -224,7 +233,12 @@ Respond with only the optimized search term, nothing else.`;
         // Search again with the optimized query
         if (optimizedQuery && optimizedQuery !== query) {
           const optimizedSearchQuery = encodeURIComponent(optimizedQuery);
-          const optimizedUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${optimizedSearchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+          let optimizedUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${optimizedSearchQuery}&key=${GOOGLE_MAPS_API_KEY}`;
+          
+          // Add location bias if user location is available
+          if (userLocation && userLocation.lat && userLocation.lng) {
+            optimizedUrl += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+          }
           
           console.log('Optimized search URL:', optimizedUrl);
           const optimizedResp = await fetch(optimizedUrl);
@@ -316,7 +330,7 @@ Respond as JSON: {"overview": "summary", "sentiment": number}`;
       places: rankedPlaces, 
       searchLocation,
       totalResults: places.length,
-      intelligentSearchUsed: placesData.results?.length === 0 && places.length > 0
+      intelligentSearchUsed: useIntelligentSearch || (placesData.results?.length === 0 && places.length > 0)
     });
   } catch (err) {
     console.error('Search error:', err);
