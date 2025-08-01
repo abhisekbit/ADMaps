@@ -2518,7 +2518,7 @@ function AuthenticatedApp() {
                       fullWidth
                       variant="outlined"
                       label="Search for stops along your route in natural language"
-                      placeholder="e.g., Find me an Indian Restaurant along the route without a detour"
+                      placeholder="e.g., EV Charging Station after 300km or 3 hrs"
                       value={stopQuery}
                       onChange={e => setStopQuery(e.target.value)}
                       sx={textFieldSx}

@@ -179,7 +179,7 @@ app.post('/search', authenticateToken, async (req, res) => {
     
     // Add location bias if user location is available
     if (userLocation && userLocation.lat && userLocation.lng) {
-      url += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+      url += `&location=${userLocation.lat},${userLocation.lng}&radius=10000`;
     }
     
     console.log('Search URL:', url);
@@ -237,7 +237,7 @@ Respond with only the optimized search term, nothing else.`;
           
           // Add location bias if user location is available
           if (userLocation && userLocation.lat && userLocation.lng) {
-            optimizedUrl += `&location=${userLocation.lat},${userLocation.lng}&radius=50000`;
+            optimizedUrl += `&location=${userLocation.lat},${userLocation.lng}&radius=10000`;
           }
           
           console.log('Optimized search URL:', optimizedUrl);
@@ -699,11 +699,22 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     }
     // If only location was specified, searchLocation was already set by the location search above
     
-    // Find places along the route
-    const searchQuery = encodeURIComponent(`${parsed.type}`);
+    // Find places along the route with feature-based search
+    let searchQuery = `${parsed.type}`;
+    
+    // Add features to the search query if available
+    if (parsed.features && parsed.features.length > 0) {
+      const featureKeywords = parsed.features.join(' ');
+      searchQuery += ` ${featureKeywords}`;
+      console.log(`Enhanced search query with features: "${searchQuery}"`);
+    }
+    
+    const encodedSearchQuery = encodeURIComponent(searchQuery);
     console.log(`Final search location: ${searchLocation.lat}, ${searchLocation.lng}`);
     console.log(`Navigation origin was: ${currentLocation.lat}, ${currentLocation.lng}`);
-    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${searchQuery}&location=${searchLocation.lat},${searchLocation.lng}&radius=8000&key=${GOOGLE_MAPS_API_KEY}`;
+    console.log(`Search query: "${searchQuery}"`);
+    
+    const url = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${encodedSearchQuery}&location=${searchLocation.lat},${searchLocation.lng}&radius=8000&key=${GOOGLE_MAPS_API_KEY}`;
     const placesResp = await fetch(url);
     const placesData = await placesResp.json();
     
@@ -766,14 +777,44 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
       return a.distanceFromRoute - b.distanceFromRoute;
     });
 
+    // Apply feature-based filtering if features are specified
+    let filteredPlaces = rankedPlaces;
+    if (parsed.features && parsed.features.length > 0) {
+      console.log(`Applying feature-based filtering for: ${parsed.features.join(', ')}`);
+      
+      // Get more places for feature filtering (up to 20 instead of 10)
+      const extendedPlaces = rankedPlaces.slice(0, 20);
+      
+      // Filter places based on features
+      filteredPlaces = extendedPlaces.filter(place => {
+        const placeName = place.name.toLowerCase();
+        const placeTypes = place.types ? place.types.map(t => t.toLowerCase()) : [];
+        
+        // Check if any of the features are mentioned in the place name or types
+        return parsed.features.some(feature => {
+          const featureLower = feature.toLowerCase();
+          return placeName.includes(featureLower) || 
+                 placeTypes.some(type => type.includes(featureLower));
+        });
+      });
+      
+      console.log(`Feature filtering: ${rankedPlaces.length} places → ${filteredPlaces.length} places`);
+      
+      // If no places match features, fall back to original results
+      if (filteredPlaces.length === 0) {
+        console.log('No places matched features, using original results');
+        filteredPlaces = rankedPlaces.slice(0, 5);
+      }
+    }
+
     // Get top 5 places and enhance with review summaries
-    const topPlaces = rankedPlaces.slice(0, 5);
+    const topPlaces = filteredPlaces.slice(0, 5);
     
     // Enhance places with detailed information including reviews
     for (const place of topPlaces) {
       try {
-        // Fetch detailed place information including reviews
-        const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=reviews,photos,formatted_address,rating,user_ratings_total&key=${GOOGLE_MAPS_API_KEY}`;
+        // Fetch detailed place information including reviews and types
+        const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${place.place_id}&fields=reviews,photos,formatted_address,rating,user_ratings_total,types,website,formatted_phone_number&key=${GOOGLE_MAPS_API_KEY}`;
         const detailsResponse = await fetch(detailsUrl);
         const detailsData = await detailsResponse.json();
         
@@ -785,6 +826,38 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
           if (placeDetails.formatted_address) place.formatted_address = placeDetails.formatted_address;
           if (placeDetails.rating) place.rating = placeDetails.rating;
           if (placeDetails.user_ratings_total) place.user_ratings_total = placeDetails.user_ratings_total;
+          if (placeDetails.types) place.types = placeDetails.types;
+          if (placeDetails.website) place.website = placeDetails.website;
+          if (placeDetails.formatted_phone_number) place.formatted_phone_number = placeDetails.formatted_phone_number;
+          
+          // Enhanced feature matching with place details
+          if (parsed.features && parsed.features.length > 0) {
+            const placeName = place.name.toLowerCase();
+            const placeTypes = placeDetails.types ? placeDetails.types.map(t => t.toLowerCase()) : [];
+            const placeAddress = placeDetails.formatted_address ? placeDetails.formatted_address.toLowerCase() : '';
+            
+            // Check feature match score
+            let featureMatchScore = 0;
+            const matchedFeatures = [];
+            
+            parsed.features.forEach(feature => {
+              const featureLower = feature.toLowerCase();
+              if (placeName.includes(featureLower)) {
+                featureMatchScore += 2; // High score for name match
+                matchedFeatures.push(feature);
+              } else if (placeTypes.some(type => type.includes(featureLower))) {
+                featureMatchScore += 1; // Medium score for type match
+                matchedFeatures.push(feature);
+              } else if (placeAddress.includes(featureLower)) {
+                featureMatchScore += 0.5; // Low score for address match
+                matchedFeatures.push(feature);
+              }
+            });
+            
+            place.featureMatchScore = featureMatchScore;
+            place.matchedFeatures = matchedFeatures;
+            console.log(`Place "${place.name}" - Feature match score: ${featureMatchScore}, Matched features: ${matchedFeatures.join(', ')}`);
+          }
           
           // Calculate distance from start
           place.distanceFromStart = calculateDistance(
@@ -850,6 +923,27 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
         console.error('Error fetching place details:', detailsError);
         // Continue with basic place information
       }
+    }
+
+    // Final sorting based on feature match scores if features were specified
+    if (parsed.features && parsed.features.length > 0) {
+      console.log('Applying final feature-based sorting...');
+      topPlaces.sort((a, b) => {
+        const scoreA = a.featureMatchScore || 0;
+        const scoreB = b.featureMatchScore || 0;
+        
+        if (scoreA !== scoreB) {
+          return scoreB - scoreA; // Higher score first
+        }
+        
+        // If feature scores are equal, sort by distance from route
+        return a.distanceFromRoute - b.distanceFromRoute;
+      });
+      
+      console.log('Final sorted places by feature match:');
+      topPlaces.forEach((place, index) => {
+        console.log(`${index + 1}. "${place.name}" - Feature score: ${place.featureMatchScore || 0}, Distance: ${place.distanceFromRoute?.toFixed(2)}km`);
+      });
     }
 
     res.json({
