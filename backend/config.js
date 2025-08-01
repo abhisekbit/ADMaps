@@ -19,6 +19,9 @@ async function getConfig() {
             console.warn('AZURE_APP_CONFIG_CONNECTION_STRING not set, using environment variables');
             return {
                 OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+                OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+                OPENAI_API_VERSION: process.env.OPENAI_API_VERSION,
+                OPENAI_MODEL: process.env.OPENAI_MODEL,
                 GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY,
                 JWT_SECRET: process.env.JWT_SECRET,
                 ADMIN_USERNAME: process.env.ADMIN_USERNAME,
@@ -48,6 +51,9 @@ async function getConfig() {
         
         return {
             OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+            OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+            OPENAI_API_VERSION: process.env.OPENAI_API_VERSION,
+            OPENAI_MODEL: process.env.OPENAI_MODEL,
             GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY,
             JWT_SECRET: process.env.JWT_SECRET,
             ADMIN_USERNAME: process.env.ADMIN_USERNAME,

@@ -573,6 +573,12 @@ function AuthenticatedApp() {
         e.preventDefault();
         if (selectedStartingPointSuggestionIndex >= 0 && selectedStartingPointSuggestionIndex < startingPointAutocompleteSuggestions.length) {
           handleStartingPointSuggestionSelect(startingPointAutocompleteSuggestions[selectedStartingPointSuggestionIndex]);
+          // Auto-start navigation after selecting a suggestion
+          setTimeout(() => {
+            if (selectedPlace && startingPointLocation) {
+              handleConfirmNavigation();
+            }
+          }, 100);
         } else {
           // Close autocomplete if no suggestion is selected
           setShowStartingPointAutocomplete(false);
@@ -1772,7 +1778,7 @@ function AuthenticatedApp() {
                     fullWidth
                     variant="outlined"
                     label="Search for Places in natural language"
-                    placeholder="e.g., Find a Coffee shop in Singapore near the Marina Bay Sands"
+                    placeholder="e.g., Where did India win the 2011 Cricket World Cup?"
                     value={search}
                     onChange={(e) => {
                       const value = e.target.value;
@@ -2311,6 +2317,14 @@ function AuthenticatedApp() {
                 )}
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <Button
+                    variant="contained"
+                    onClick={handleConfirmNavigation}
+                    disabled={navigating}
+                    sx={{ flex: 1 }}
+                  >
+                    {navigating ? <CircularProgress size={20} /> : 'Start Navigation'}
+                  </Button>
+                  <Button
                     variant="outlined"
                     onClick={() => {
                       setShowStartingPointInput(false);
@@ -2320,14 +2334,6 @@ function AuthenticatedApp() {
                     sx={{ flex: 1 }}
                   >
                     Cancel
-                  </Button>
-                  <Button
-                    variant="contained"
-                    onClick={handleConfirmNavigation}
-                    disabled={navigating}
-                    sx={{ flex: 1 }}
-                  >
-                    {navigating ? <CircularProgress size={20} /> : 'Start Navigation'}
                   </Button>
                 </Box>
               </Paper>
@@ -2521,7 +2527,7 @@ function AuthenticatedApp() {
                     />
                     <Button 
                       type="submit" 
-                      variant="outlined" 
+                      variant="contained" 
                       color="primary" 
                       disabled={searchingStops || !stopQuery.trim() || !encodedPolyline || !navigationOrigin} 
                       sx={{ height: 48, fontWeight: 600, borderRadius: 12 }}
@@ -2617,7 +2623,7 @@ function AuthenticatedApp() {
                                 )}
                               </Typography>
                               <Typography variant="body2" sx={{ fontSize: '0.8rem', color: theme.palette.text.secondary }}>
-                                💡 Using time-based search: Finding places near the calculated point along your route based on average driving speed (50 km/h)
+                                💡 Using time-based search: Finding places near the calculated point along your route based on average driving speed (70 km/h)
                               </Typography>
                             </>
                           );
@@ -2671,7 +2677,10 @@ function AuthenticatedApp() {
                         <List sx={{ p: 0 }}>
                           {suggestedStops.map((stop, idx) => (
                             <React.Fragment key={stop.place_id || idx}>
-                              <ListItem sx={{ 
+                              <ListItem 
+                                onMouseEnter={() => setHoveredPlace({ title: stop.name, position: stop.geometry.location })}
+                                onMouseLeave={() => setHoveredPlace(null)}
+                                sx={{ 
                                 flexDirection: 'column',
                                 alignItems: 'stretch',
                                 p: { xs: 2, sm: 3 },
@@ -2802,13 +2811,14 @@ function AuthenticatedApp() {
                                     </Box>
                                   )}
                                   
-                                  {/* Distance, Route Info, and Add Button Section - Full Width */}
+                                  {/* Distance, Time, Sentiment, and Add Button Section - Full Width */}
                                   <Box sx={{ 
                                     display: 'flex', 
                                     gap: 1, 
                                     flexWrap: 'wrap',
                                     alignItems: 'center'
                                   }}>
+                                    {/* Distance from Start */}
                                     <Box sx={{ 
                                       display: 'flex', 
                                       alignItems: 'center', 
@@ -2825,27 +2835,51 @@ function AuthenticatedApp() {
                                         fontWeight: 600,
                                         fontSize: '0.75rem'
                                       }}>
-                                        {stop.distanceFromRoute ? `${stop.distanceFromRoute.toFixed(1)}km from route` : 'Near route'}
+                                        {stop.distanceFromStart ? `${stop.distanceFromStart.toFixed(0)}km` : 'Calculating...'}
                                       </Typography>
                                     </Box>
-                                    {stop.distanceFromOrigin && (
+                                    
+                                    {/* Time from Start */}
+                                    {stop.timeFromStart && (
                                       <Box sx={{ 
                                         display: 'flex', 
                                         alignItems: 'center', 
                                         gap: 0.5,
-                                        bgcolor: darkMode ? 'rgba(76,175,80,0.15)' : 'rgba(76,175,80,0.1)',
+                                        bgcolor: darkMode ? 'rgba(156,39,176,0.15)' : 'rgba(156,39,176,0.1)',
                                         px: 1.5,
                                         py: 0.5,
                                         borderRadius: 1,
-                                        border: `1px solid ${darkMode ? 'rgba(76,175,80,0.3)' : 'rgba(76,175,80,0.2)'}`
+                                        border: `1px solid ${darkMode ? 'rgba(156,39,176,0.3)' : 'rgba(156,39,176,0.2)'}`
                                       }}>
-                                        <MoodIcon sx={{ fontSize: '1rem', color: 'success.main' }} />
                                         <Typography variant="caption" sx={{ 
-                                          color: 'success.main',
+                                          color: darkMode ? '#ab47bc' : '#7b1fa2',
                                           fontWeight: 600,
                                           fontSize: '0.75rem'
                                         }}>
-                                          {stop.timeDisplayFromOrigin || `${Math.round(stop.distanceFromOrigin / 50 * 60)}m`} from start
+                                          🕒 {stop.timeFromStart}
+                                        </Typography>
+                                      </Box>
+                                    )}
+                                    
+                                    {/* Sentiment */}
+                                    {stop.sentimentScore !== undefined && (
+                                      <Box sx={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 0.5,
+                                        bgcolor: darkMode ? 'rgba(255,193,7,0.15)' : 'rgba(255,193,7,0.1)',
+                                        px: 1.5,
+                                        py: 0.5,
+                                        borderRadius: 1,
+                                        border: `1px solid ${darkMode ? 'rgba(255,193,7,0.3)' : 'rgba(255,193,7,0.2)'}`
+                                      }}>
+                                        <MoodIcon sx={{ fontSize: '1rem', color: 'warning.main' }} />
+                                        <Typography variant="caption" sx={{ 
+                                          color: 'warning.main',
+                                          fontWeight: 600,
+                                          fontSize: '0.75rem'
+                                        }}>
+                                          {stop.sentimentScore || 50}
                                         </Typography>
                                       </Box>
                                     )}
@@ -2926,7 +2960,10 @@ function AuthenticatedApp() {
                         <List sx={{ p: 0 }}>
                           {addedStops.map((stop, index) => (
                             <React.Fragment key={stop.place_id || index}>
-                              <ListItem sx={{ 
+                              <ListItem 
+                                onMouseEnter={() => setHoveredPlace({ title: stop.name, position: stop.geometry.location })}
+                                onMouseLeave={() => setHoveredPlace(null)}
+                                sx={{ 
                                 flexDirection: 'column',
                                 alignItems: 'stretch',
                                 p: { xs: 2, sm: 3 },
@@ -3065,14 +3102,82 @@ function AuthenticatedApp() {
                                     </Box>
                                   )}
                                   
-                                  {/* Action Button Section - Full Width */}
+                                  {/* Distance, Time, Sentiment, and Action Button Section - Full Width */}
                                   <Box sx={{ 
                                     display: 'flex', 
                                     gap: 1, 
                                     flexWrap: 'wrap',
                                     alignItems: 'center',
-                                    justifyContent: 'flex-end'
+                                    justifyContent: 'space-between'
                                   }}>
+                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                                      {/* Distance from Start */}
+                                      <Box sx={{ 
+                                        display: 'flex', 
+                                        alignItems: 'center', 
+                                        gap: 0.5,
+                                        bgcolor: darkMode ? 'rgba(33,150,243,0.15)' : 'rgba(33,150,243,0.1)',
+                                        px: 1.5,
+                                        py: 0.5,
+                                        borderRadius: 1,
+                                        border: `1px solid ${darkMode ? 'rgba(33,150,243,0.3)' : 'rgba(33,150,243,0.2)'}`
+                                      }}>
+                                        <LocationOnIcon sx={{ fontSize: '1rem', color: 'primary.main' }} />
+                                        <Typography variant="caption" sx={{ 
+                                          color: 'primary.main',
+                                          fontWeight: 600,
+                                          fontSize: '0.75rem'
+                                        }}>
+                                          {stop.distanceFromStart ? `${stop.distanceFromStart.toFixed(0)}km` : 'Calculating...'}
+                                        </Typography>
+                                      </Box>
+                                      
+                                      {/* Time from Start */}
+                                      {stop.timeFromStart && (
+                                        <Box sx={{ 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          gap: 0.5,
+                                          bgcolor: darkMode ? 'rgba(156,39,176,0.15)' : 'rgba(156,39,176,0.1)',
+                                          px: 1.5,
+                                          py: 0.5,
+                                          borderRadius: 1,
+                                          border: `1px solid ${darkMode ? 'rgba(156,39,176,0.3)' : 'rgba(156,39,176,0.2)'}`
+                                        }}>
+                                          <Typography variant="caption" sx={{ 
+                                            color: darkMode ? '#ab47bc' : '#7b1fa2',
+                                            fontWeight: 600,
+                                            fontSize: '0.75rem'
+                                          }}>
+                                            🕒 {stop.timeFromStart}
+                                          </Typography>
+                                        </Box>
+                                      )}
+                                      
+                                      {/* Sentiment */}
+                                      {stop.sentimentScore !== undefined && (
+                                        <Box sx={{ 
+                                          display: 'flex', 
+                                          alignItems: 'center', 
+                                          gap: 0.5,
+                                          bgcolor: darkMode ? 'rgba(255,193,7,0.15)' : 'rgba(255,193,7,0.1)',
+                                          px: 1.5,
+                                          py: 0.5,
+                                          borderRadius: 1,
+                                          border: `1px solid ${darkMode ? 'rgba(255,193,7,0.3)' : 'rgba(255,193,7,0.2)'}`
+                                        }}>
+                                          <MoodIcon sx={{ fontSize: '1rem', color: 'warning.main' }} />
+                                          <Typography variant="caption" sx={{ 
+                                            color: 'warning.main',
+                                            fontWeight: 600,
+                                            fontSize: '0.75rem'
+                                          }}>
+                                            {stop.sentimentScore || 50}
+                                          </Typography>
+                                        </Box>
+                                      )}
+                                    </Box>
+                                    
                                     <Button
                                       variant="outlined"
                                       size="small"
@@ -3275,27 +3380,31 @@ function AuthenticatedApp() {
                       typeof stop.geometry.location.lat === 'number' &&
                       typeof stop.geometry.location.lng === 'number'
                     )
-                    .map((stop, index) => (
-                    <Marker
-                      key={stop.place_id || index}
-                      position={{ 
-                        lat: parseFloat(stop.geometry.location.lat), 
-                        lng: parseFloat(stop.geometry.location.lng) 
-                      }}
-                      title={`Stop ${index + 1}: ${stop.name}`}
-                      icon={{
-                        url: 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png',
-                        scaledSize: { width: 36, height: 36 }
-                      }}
-                      label={{
-                        text: `STOP ${index + 1}`,
-                        color: "#000000",
-                        fontSize: "10px",
-                        fontWeight: "bold",
-                        className: "marker-label"
-                      }}
-                    />
-                  ))}
+                    .map((stop, index) => {
+                      const isHovered = hoveredPlace && hoveredPlace.title === stop.name;
+                      return (
+                        <Marker
+                          key={stop.place_id || index}
+                          position={{ 
+                            lat: parseFloat(stop.geometry.location.lat), 
+                            lng: parseFloat(stop.geometry.location.lng) 
+                          }}
+                          title={`Stop ${index + 1}: ${stop.name}`}
+                          icon={{
+                            url: 'http://maps.google.com/mapfiles/ms/icons/yellow-dot.png',
+                            scaledSize: isHovered ? { width: 48, height: 48 } : { width: 36, height: 36 }
+                          }}
+                          label={{
+                            text: `STOP ${index + 1}`,
+                            color: "#000000",
+                            fontSize: isHovered ? "12px" : "10px",
+                            fontWeight: "bold",
+                            className: "marker-label"
+                          }}
+                          animation={isHovered ? window.google?.maps?.Animation?.BOUNCE : null}
+                        />
+                      );
+                    })}
 
                   {routePolyline && (
                     <Polyline

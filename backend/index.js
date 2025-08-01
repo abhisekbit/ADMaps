@@ -27,7 +27,12 @@ async function initializeConfig() {
       throw new Error('GOOGLE_MAPS_API_KEY not configured');
     }
     
-    openai = new OpenAI({ apiKey: config.OPENAI_API_KEY });
+    openai = new OpenAI({ 
+      apiKey: config.OPENAI_API_KEY,
+      baseURL: config.OPENAI_BASE_URL,
+      defaultQuery: { 'api-version': config.OPENAI_API_VERSION },
+      defaultHeaders: { 'api-key': config.OPENAI_API_KEY }
+    });
     GOOGLE_MAPS_API_KEY = config.GOOGLE_MAPS_API_KEY;
     
     console.log('Configuration loaded successfully');
@@ -55,6 +60,9 @@ app.post('/test-location', async (req, res) => {
   if (!query) return res.status(400).json({ error: 'Missing query' });
 
   try {
+    // Get current configuration
+    const config = await getConfig();
+    
     // Use OpenAI to extract place type and location
     const prompt = `Extract the type of place and location from this search: "${query}". 
     If the query mentions a specific location (like "coffee shops in Singapore" or "restaurants in New York"), use that location.
@@ -62,7 +70,7 @@ app.post('/test-location', async (req, res) => {
     Respond as JSON with 'type' and 'location'.`;
     
     const aiResp = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: config.OPENAI_MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
     });
@@ -149,6 +157,8 @@ app.post('/search', authenticateToken, async (req, res) => {
   console.log('Search request:', { query, userLocation });
 
   try {
+    // Get current configuration
+    const config = await getConfig();
     // Determine search location
     let searchLocation;
     if (userLocation && userLocation.lat && userLocation.lng) {
@@ -202,7 +212,7 @@ Rules:
 Respond with only the optimized search term, nothing else.`;
 
         const aiResponse = await openai.chat.completions.create({
-          model: 'gpt-3.5-turbo',
+          model: config.OPENAI_MODEL,
           messages: [{ role: 'user', content: intelligentSearchPrompt }],
           temperature: 0.1,
           max_tokens: 100
@@ -262,7 +272,7 @@ ${reviewsText}
 Respond as JSON: {"overview": "summary", "sentiment": number}`;
               
               const aiResp = await openai.chat.completions.create({
-                model: 'gpt-3.5-turbo',
+                model: config.OPENAI_MODEL,
                 messages: [{ role: 'user', content: reviewPrompt }],
                 temperature: 0.3,
               });
@@ -394,6 +404,9 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
   // currentLocation here will be the starting position (if defined) or current location from frontend
 
   try {
+    // Get current configuration
+    const config = await getConfig();
+    
     // Use OpenAI to parse the stop query
     const prompt = `Parse this stop request along a route: "${stopQuery}". 
     Extract:
@@ -436,7 +449,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     Respond only with valid JSON.`;
     
     const aiResp = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model: config.OPENAI_MODEL,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
     });
@@ -458,7 +471,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     
     // Determine search location based on constraints
     let searchLocation = currentLocation;
-    const averageSpeedKmh = 50; // Conservative average speed
+    const averageSpeedKmh = 70; // Average highway speed
     
     // If a specific location is mentioned, find it along the route first
     if (parsed.location && parsed.location.trim()) {
@@ -759,6 +772,18 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
           if (placeDetails.rating) place.rating = placeDetails.rating;
           if (placeDetails.user_ratings_total) place.user_ratings_total = placeDetails.user_ratings_total;
           
+          // Calculate distance from start
+          place.distanceFromStart = calculateDistance(
+            currentLocation.lat, currentLocation.lng,
+            place.geometry.location.lat, place.geometry.location.lng
+          );
+          
+          // Calculate estimated time from start (using average speed)
+          const timeInMinutes = Math.round(place.distanceFromStart / averageSpeedKmh * 60);
+          const hours = Math.floor(timeInMinutes / 60);
+          const minutes = timeInMinutes % 60;
+          place.timeFromStart = hours > 0 ? `${hours}hr ${minutes}min` : `${minutes}min`;
+          
           // Process reviews for summarization
           if (placeDetails.reviews && placeDetails.reviews.length > 0) {
             const topReviews = placeDetails.reviews.slice(0, 10);
@@ -780,7 +805,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
               }`;
               
               const reviewCompletion = await openai.chat.completions.create({
-                model: "gpt-3.5-turbo",
+                model: config.OPENAI_MODEL,
                 messages: [{ role: "user", content: reviewPrompt }],
                 max_tokens: 300,
                 temperature: 0.3,
@@ -791,18 +816,19 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
               try {
                 const reviewAnalysis = JSON.parse(reviewResponse);
                 place.overviewReview = reviewAnalysis.summary;
-                place.sentimentScore = reviewAnalysis.sentiment;
+                // Convert sentiment from -1 to 1 scale to 0 to 100 percentage
+                place.sentimentScore = Math.round((reviewAnalysis.sentiment + 1) * 50);
               } catch (parseError) {
                 console.error('Error parsing review analysis JSON:', parseError);
                 // Fallback to basic summary
                 place.overviewReview = `Based on ${topReviews.length} reviews. Average rating: ${place.rating || 'Not available'}.`;
-                place.sentimentScore = 0;
+                place.sentimentScore = 50; // Neutral (50%)
               }
             } catch (openaiError) {
               console.error('Error getting review summary from OpenAI:', openaiError);
               // Fallback summary
               place.overviewReview = `Based on ${topReviews.length} reviews. Average rating: ${place.rating || 'Not available'}.`;
-              place.sentimentScore = 0;
+              place.sentimentScore = 50; // Neutral (50%)
             }
           }
         }
