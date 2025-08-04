@@ -77,7 +77,7 @@ app.post('/test-location', async (req, res) => {
     const aiText = aiResp.choices[0].message.content;
     let parsed;
     try {
-      parsed = JSON.parse(aiText);
+      parsed = extractJSONFromResponse(aiText);
     } catch (e) {
       return res.status(500).json({ error: 'Failed to parse AI response', aiText });
     }
@@ -153,6 +153,36 @@ app.post('/login', (req, res) => {
 });
 
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
+// Helper function to extract JSON from OpenAI responses that might be wrapped in markdown
+function extractJSONFromResponse(responseText) {
+  try {
+    // First try to parse as pure JSON
+    return JSON.parse(responseText);
+  } catch (e) {
+    // If that fails, try to extract JSON from markdown code blocks
+    const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[1]);
+      } catch (e2) {
+        console.error('Failed to parse JSON from markdown block:', e2);
+        throw e2;
+      }
+    }
+    // If no markdown block found, try to find JSON object in the text
+    const jsonObjectMatch = responseText.match(/\{[\s\S]*\}/);
+    if (jsonObjectMatch) {
+      try {
+        return JSON.parse(jsonObjectMatch[0]);
+      } catch (e3) {
+        console.error('Failed to parse JSON object from text:', e3);
+        throw e3;
+      }
+    }
+    throw new Error('No valid JSON found in response');
+  }
+}
 
 app.post('/search', authenticateToken, async (req, res) => {
   const { query, userLocation, useIntelligentSearch } = req.body;
@@ -293,7 +323,7 @@ Respond as JSON: {"overview": "summary", "sentiment": number}`;
               
               const aiText = aiResp.choices[0].message.content;
               try {
-                const reviewAnalysis = JSON.parse(aiText);
+                const reviewAnalysis = extractJSONFromResponse(aiText);
                 overviewReview = reviewAnalysis.overview || '';
                 sentimentScore = reviewAnalysis.sentiment || 0;
               } catch (e) {
@@ -470,7 +500,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
     const aiText = aiResp.choices[0].message.content;
     let parsed;
     try {
-      parsed = JSON.parse(aiText);
+      parsed = extractJSONFromResponse(aiText);
     } catch (e) {
       return res.status(500).json({ error: 'Failed to parse AI response', aiText });
     }
@@ -901,7 +931,7 @@ app.post('/add-stop', authenticateToken, async (req, res) => {
               const reviewResponse = reviewCompletion.choices[0].message.content.trim();
               
               try {
-                const reviewAnalysis = JSON.parse(reviewResponse);
+                const reviewAnalysis = extractJSONFromResponse(reviewResponse);
                 place.overviewReview = reviewAnalysis.summary;
                 // Convert sentiment from -1 to 1 scale to 0 to 100 percentage
                 place.sentimentScore = Math.round((reviewAnalysis.sentiment + 1) * 50);
